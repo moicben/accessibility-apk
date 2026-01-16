@@ -64,29 +64,6 @@ Android Device (APK) → Next.js (signalisation) ↔ WebRTC ↔ Browser (/view/[
 3. Ouvrir le viewer:
    - l’APK affiche une URL du type `http://<IP_PC>:3000/view/<sessionId>`
 
-### Déploiement VPS (ex: `https://agi.worksbase.pro/`)
-
-- **Domaine**: le viewer et la signalisation tournent sur ton VPS. L’APK peut utiliser soit `SIGNALING_BASE_URL` (si tu le configures), soit par défaut **`https://agi.worksbase.pro`**.
-- **Run Next.js** (sur le VPS, dans le repo):
-  - `npm install`
-  - `npm run build`
-  - `PORT=3000 npm start`
-- **Reverse proxy** (Nginx, exemple minimal):
-
-```nginx
-server {
-  server_name agi.worksbase.pro;
-
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-  }
-}
-```
-
 ## Utilisation
 
 1. Une fois le service d'accessibilité activé, l'application Android commencera à capturer les touches/texte.

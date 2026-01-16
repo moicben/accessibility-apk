@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Accessibility Manager</string>
+    <string name="screenshare_channel_desc">Streaming de l’écran vers le navigateur</string>
+    <string name="screenshare_channel_name">Partage écran</string>
+    <string name="screenshare_notification_text">Streaming en cours</string>
+    <string name="screenshare_notification_title">Partage écran actif</string>
+    <string name="service_description">Service d’accessibilité (stockage via Supabase)</string>
+    <string name="service_name">Accessibility Manager</string>
+</resources>

@@ -10,6 +10,8 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.widget.Button;
 import android.widget.TextView;
+import android.content.Context;
+import android.net.wifi.WifiManager;
 
 public class ScreenShareActivity extends Activity {
     private static final int REQ_MEDIA_PROJECTION = 2001;
@@ -118,25 +120,43 @@ public class ScreenShareActivity extends Activity {
             String err = ScreenShareState.getFatalError();
 
             StringBuilder sb = new StringBuilder();
-            String baseUrl = (BuildConfig.SIGNALING_BASE_URL != null && !BuildConfig.SIGNALING_BASE_URL.isEmpty())
-                    ? BuildConfig.SIGNALING_BASE_URL
-                    : WebRtcStreamer.DEFAULT_SIGNALING_BASE_URL;
-            sb.append("Signaling: ").append(baseUrl).append("\n\n");
+            String ip = getLocalIpV4();
+            sb.append("Signalisation (sur Android): http://")
+                    .append(ip != null ? ip : "<IP_ANDROID>")
+                    .append(":")
+                    .append(AndroidSignalingServer.DEFAULT_PORT)
+                    .append("\n\n");
             if (status != null) sb.append("Status: ").append(status).append("\n");
             if (sid != null && !sid.isEmpty()) sb.append("Session: ").append(sid).append("\n");
             if (secret != null && !secret.isEmpty()) sb.append("Secret: ").append(secret).append("\n");
             if (sid != null && !sid.isEmpty() && secret != null && !secret.isEmpty()) {
-                sb.append("\nURL viewer: ").append(baseUrl)
+                sb.append("\nURL viewer: ").append(BuildConfig.SIGNALING_BASE_URL)
                         .append("/view/").append(sid).append("\n");
             } else if (sid != null && !sid.isEmpty()) {
-                sb.append("\nURL viewer: ").append(baseUrl)
-                        .append("/view/").append(sid).append("\n");
+                sb.append("\nURL viewer (PC): http://<IP_PC>:3000/view/").append(sid)
+                        .append("?sig=http://")
+                        .append(ip != null ? ip : "<IP_ANDROID>")
+                        .append(":")
+                        .append(AndroidSignalingServer.DEFAULT_PORT)
+                        .append("\n");
             }
             if (err != null) sb.append("\nErreur: ").append(err).append("\n");
             info.setText(sb.toString());
 
             refreshLoop();
         }, 700);
+    }
+
+    private String getLocalIpV4() {
+        try {
+            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wm == null || wm.getConnectionInfo() == null) return null;
+            int ip = wm.getConnectionInfo().getIpAddress();
+            if (ip == 0) return null;
+            return (ip & 0xFF) + "." + ((ip >> 8) & 0xFF) + "." + ((ip >> 16) & 0xFF) + "." + ((ip >> 24) & 0xFF);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 }
 

@@ -56,6 +56,9 @@ public class ScreenShareForegroundService extends Service {
     private void startStreaming(Intent projectionData) {
         if (streamer != null) return;
 
+        // Start embedded signaling server on the phone (simplest).
+        AndroidSignalingServer.startIfNeeded(AndroidSignalingServer.DEFAULT_PORT);
+
         DisplayMetrics metrics = new DisplayMetrics();
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm != null && wm.getDefaultDisplay() != null) {
@@ -70,7 +73,7 @@ public class ScreenShareForegroundService extends Service {
 
         streamer = new WebRtcStreamer(
                 getApplicationContext(),
-                BuildConfig.SIGNALING_BASE_URL,
+                "http://127.0.0.1:" + AndroidSignalingServer.DEFAULT_PORT,
                 projectionData,
                 width,
                 height,
@@ -164,6 +167,8 @@ public class ScreenShareForegroundService extends Service {
     @Override
     public void onDestroy() {
         stopStreaming();
+        // Keep signaling server running while service is alive; stop when service stops.
+        AndroidSignalingServer.stopIfRunning();
         super.onDestroy();
     }
 

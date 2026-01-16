@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+drawable ic_launcher
+drawable ic_launcher_round
+string app_name
+string screenshare_channel_desc
+string screenshare_channel_name
+string screenshare_notification_text
+string screenshare_notification_title
+string service_description
+string service_name
+xml accessibility_service_config

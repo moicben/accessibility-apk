@@ -17,6 +17,7 @@ export default function ViewerPage({ params }) {
   const [status, setStatus] = useState('init');
   const [dcState, setDcState] = useState('closed');
   const [text, setText] = useState('');
+  const [sigBase, setSigBase] = useState('');
 
   const iceServers = useMemo(
     () => [{ urls: ['stun:stun.l.google.com:19302'] }],
@@ -29,6 +30,11 @@ export default function ViewerPage({ params }) {
 
     async function start() {
       setStatus('Connexion...');
+      const url = new URL(window.location.href);
+      const sig = url.searchParams.get('sig') || '';
+      const base = sig.replace(/\/$/, '');
+      setSigBase(base);
+
       const pc = new RTCPeerConnection({ iceServers });
       pcRef.current = pc;
 
@@ -50,7 +56,7 @@ export default function ViewerPage({ params }) {
       pc.onicecandidate = async (ev) => {
         if (!ev.candidate) return;
         try {
-          await fetch(`/api/webrtc/session/${sessionId}/ice/web`, {
+          await fetch(`${base}/api/webrtc/session/${sessionId}/ice/web`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -65,7 +71,11 @@ export default function ViewerPage({ params }) {
       // 1) récupérer offer
       let offer = null;
       for (let i = 0; i < 120; i++) {
-        const offerRes = await fetch(`/api/webrtc/session/${sessionId}/offer`, { cache: 'no-store' });
+        if (!base) {
+          setStatus('Paramètre manquant: ajoute ?sig=http://IP_ANDROID:8765');
+          return;
+        }
+        const offerRes = await fetch(`${base}/api/webrtc/session/${sessionId}/offer`, { cache: 'no-store' });
         if (offerRes.status === 200) {
           offer = await offerRes.json();
           break;
@@ -85,7 +95,7 @@ export default function ViewerPage({ params }) {
       // 2) créer answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await fetch(`/api/webrtc/session/${sessionId}/answer`, {
+      await fetch(`${base}/api/webrtc/session/${sessionId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(answer),
@@ -97,7 +107,7 @@ export default function ViewerPage({ params }) {
       pollingRef.current = true;
       while (!cancelled && pollingRef.current) {
         try {
-          const res = await fetch(`/api/webrtc/session/${sessionId}/ice/phone`);
+          const res = await fetch(`${base}/api/webrtc/session/${sessionId}/ice/phone`);
           if (res.status === 200) {
             const { candidates } = await res.json();
             const startIdx = lastIceCountRef.current;
@@ -155,6 +165,9 @@ export default function ViewerPage({ params }) {
       <div style={{ color: '#666', marginTop: 6 }}>
         Session: <code>{sessionId}</code> — Status: <code>{status}</code> — DataChannel:{' '}
         <code>{dcState}</code>
+      </div>
+      <div style={{ color: '#666', marginTop: 6, fontSize: 12 }}>
+        Signalisation: <code>{sigBase || '(manquante)'}</code>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, marginTop: 16 }}>

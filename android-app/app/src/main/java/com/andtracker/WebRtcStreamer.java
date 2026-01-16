@@ -36,7 +36,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class WebRtcStreamer {
     private static final String TAG = "WebRtcStreamer";
-    public static final String DEFAULT_SIGNALING_BASE_URL = "https://agi.worksbase.pro";
 
     public interface Events {
         void onSessionCreated(String sessionId, String secret);
@@ -73,10 +72,7 @@ public final class WebRtcStreamer {
             Events events
     ) {
         this.appContext = appContext.getApplicationContext();
-        String base = (signalingBaseUrl != null && !signalingBaseUrl.trim().isEmpty())
-                ? signalingBaseUrl
-                : DEFAULT_SIGNALING_BASE_URL;
-        this.signaling = new SignalingClient(base);
+        this.signaling = new SignalingClient(signalingBaseUrl);
         this.mediaProjectionPermissionData = mediaProjectionPermissionData;
         this.screenWidth = screenWidth;
         this.screenHeight = screenHeight;
