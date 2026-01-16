@@ -4,11 +4,12 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.text.TextUtils;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.util.Log;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -44,13 +45,42 @@ public class MainActivity extends Activity {
         statusTextView.setGravity(android.view.Gravity.CENTER);
         statusTextView.setPadding(0, 0, 0, 30);
         layout.addView(statusTextView);
+
+        // Champ de test pour générer des events TYPE_VIEW_TEXT_CHANGED
+        EditText testInput = new EditText(this);
+        testInput.setHint("Tape ici pour tester la capture");
+        testInput.setMinLines(2);
+        testInput.setGravity(android.view.Gravity.CENTER);
+        layout.addView(testInput);
+
+        Button testButton = new Button(this);
+        testButton.setText("Envoyer un test à Supabase");
+        testButton.setOnClickListener(v -> sendTestToSupabase());
+        layout.addView(testButton);
         
         Button settingsButton = new Button(this);
         settingsButton.setText("Ouvrir les paramètres d'accessibilité");
         settingsButton.setOnClickListener(v -> openAccessibilitySettings());
         layout.addView(settingsButton);
+
+        Button shareButton = new Button(this);
+        shareButton.setText("Partage écran (WebRTC)");
+        shareButton.setOnClickListener(v -> startActivity(new Intent(this, ScreenShareActivity.class)));
+        layout.addView(shareButton);
         
         return layout;
+    }
+
+    private void sendTestToSupabase() {
+        Toast.makeText(this, "Envoi test à Supabase...", Toast.LENGTH_SHORT).show();
+        SupabaseAndroidEventsClient.sendEvent(
+                this,
+                getPackageName(),
+                "test",
+                "click",
+                "TEST",
+                null
+        );
     }
     
     private void checkAccessibilityService() {

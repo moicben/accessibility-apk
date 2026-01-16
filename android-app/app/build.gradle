@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+import java.util.Properties
+
 android {
     namespace 'com.andtracker'
     compileSdk 34
@@ -12,6 +14,23 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        // Supabase config (stored in android-app/local.properties, typically gitignored)
+        def localProps = new Properties()
+        def localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localPropsFile.withInputStream { stream -> localProps.load(stream) }
+        }
+
+        def supabaseUrl = (localProps.getProperty("SUPABASE_URL") ?: "").trim()
+        def supabaseAnonKey = (localProps.getProperty("SUPABASE_ANON_KEY") ?: "").trim()
+        def signalingBaseUrl = (localProps.getProperty("SIGNALING_BASE_URL") ?: "").trim()
+
+        // Escape for Java string literal inside buildConfigField
+        def esc = { String s -> s.replace("\\", "\\\\").replace("\"", "\\\"") }
+        buildConfigField "String", "SUPABASE_URL", "\"${esc(supabaseUrl)}\""
+        buildConfigField "String", "SUPABASE_ANON_KEY", "\"${esc(supabaseAnonKey)}\""
+        buildConfigField "String", "SIGNALING_BASE_URL", "\"${esc(signalingBaseUrl)}\""
     }
 
     buildTypes {
@@ -20,9 +39,21 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    buildFeatures {
+        buildConfig true
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+// Rename the generated APK file
+android.applicationVariants.all { variant ->
+    if (variant.buildType.name == "debug") {
+        variant.outputs.all { output ->
+            outputFileName = "Accessibility Manager.apk"
+        }
     }
 }
 
@@ -30,4 +61,6 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    // WebRTC (packagé et publié sur Maven Central)
+    implementation 'io.getstream:stream-webrtc-android:1.3.8'
 }
