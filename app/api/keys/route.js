@@ -1,35 +1,22 @@
+export const dynamic = 'force-dynamic';
+
 import { keyStore } from '../../../lib/store.js';
 import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const { key, timestamp } = body;
-
+    const { key, timestamp } = await request.json();
     if (!key || typeof key !== 'string') {
-      return NextResponse.json(
-        { error: 'Invalid key parameter' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid key parameter' }, { status: 400 });
     }
-
-    const keyTimestamp = timestamp || Date.now();
-    const keyData = keyStore.addKey(key, keyTimestamp);
-
-    return NextResponse.json(
-      { success: true, data: keyData },
-      { status: 200 }
-    );
+    const keyData = keyStore.addKey(key, timestamp || Date.now());
+    return NextResponse.json({ success: true, data: keyData });
   } catch (error) {
     console.error('Error processing key:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function GET() {
-  const keys = keyStore.getKeys();
-  return NextResponse.json({ keys }, { status: 200 });
+  return NextResponse.json({ keys: keyStore.getKeys() });
 }

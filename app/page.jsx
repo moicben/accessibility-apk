@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
@@ -38,12 +40,9 @@ export default function Home() {
 
     eventSource.onerror = () => {
       setIsConnected(false);
-      // Réessayer la connexion après 3 secondes
       setTimeout(() => {
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-          eventSourceRef.current = new EventSource('/api/stream');
-        }
+        eventSourceRef.current?.close();
+        eventSourceRef.current = new EventSource('/api/stream');
       }, 3000);
     };
 
@@ -52,19 +51,13 @@ export default function Home() {
     };
   }, []);
 
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('fr-FR', { 
+  const formatTimestamp = (ts) => 
+    new Date(ts).toLocaleTimeString('fr-FR', { 
       hour: '2-digit', 
       minute: '2-digit', 
       second: '2-digit',
       fractionalSecondDigits: 3
     });
-  };
-
-  const clearKeys = () => {
-    setKeys([]);
-  };
 
   return (
     <main style={{
@@ -110,7 +103,7 @@ export default function Home() {
               </span>
             </div>
             <button
-              onClick={clearKeys}
+              onClick={() => setKeys([])}
               style={{
                 padding: '8px 16px',
                 backgroundColor: '#f44336',
@@ -208,15 +201,9 @@ export default function Home() {
                       fontWeight: '500',
                       color: '#333'
                     }}>
-                      {keyData.key === ' ' ? (
-                        <span style={{ color: '#999' }}>[ESPACE]</span>
-                      ) : keyData.key === '\n' ? (
-                        <span style={{ color: '#999' }}>[ENTRÉE]</span>
-                      ) : keyData.key === '\t' ? (
-                        <span style={{ color: '#999' }}>[TAB]</span>
-                      ) : (
-                        keyData.key
-                      )}
+                      {keyData.key === ' ' ? '[ESPACE]' : 
+                       keyData.key === '\n' ? '[ENTRÉE]' : 
+                       keyData.key === '\t' ? '[TAB]' : keyData.key}
                     </td>
                   </tr>
                 ))}

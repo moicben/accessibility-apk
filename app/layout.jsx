@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 export const metadata = {
   title: 'Android Key Tracker',
   description: 'Application de suivi des touches Android en temps réel',

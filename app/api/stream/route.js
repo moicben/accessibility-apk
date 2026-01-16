@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { keyStore } from '../../../lib/store.js';
 
 export async function GET(request) {
@@ -13,18 +15,15 @@ export async function GET(request) {
 
       // Écouter les nouvelles touches
       const onNewKey = (keyData) => {
-        const data = JSON.stringify({ type: 'newKey', data: keyData });
         try {
+          const data = JSON.stringify({ type: 'newKey', data: keyData });
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         } catch (error) {
-          // Le client s'est déconnecté
           keyStore.removeListener('newKey', onNewKey);
         }
       };
 
       keyStore.on('newKey', onNewKey);
-
-      // Nettoyer lors de la fermeture
       request.signal.addEventListener('abort', () => {
         keyStore.removeListener('newKey', onNewKey);
         controller.close();
