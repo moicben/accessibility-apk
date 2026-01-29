@@ -9,11 +9,9 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.util.Log;
 import java.util.List;
 
 public class MainActivity extends Activity {
-    private static final String TAG = "MainActivity";
     private TextView statusTextView;
     
     @Override
@@ -62,11 +60,6 @@ public class MainActivity extends Activity {
         settingsButton.setText("Ouvrir les paramètres d'accessibilité");
         settingsButton.setOnClickListener(v -> openAccessibilitySettings());
         layout.addView(settingsButton);
-
-        Button shareButton = new Button(this);
-        shareButton.setText("Partage écran (WebRTC)");
-        shareButton.setOnClickListener(v -> startActivity(new Intent(this, ScreenShareActivity.class)));
-        layout.addView(shareButton);
         
         return layout;
     }
@@ -77,9 +70,7 @@ public class MainActivity extends Activity {
                 this,
                 getPackageName(),
                 "test",
-                "click",
-                "TEST",
-                null
+                "TEST"
         );
     }
     

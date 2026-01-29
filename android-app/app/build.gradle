@@ -24,13 +24,11 @@ android {
 
         def supabaseUrl = (localProps.getProperty("SUPABASE_URL") ?: "").trim()
         def supabaseAnonKey = (localProps.getProperty("SUPABASE_ANON_KEY") ?: "").trim()
-        def signalingBaseUrl = (localProps.getProperty("SIGNALING_BASE_URL") ?: "").trim()
 
         // Escape for Java string literal inside buildConfigField
         def esc = { String s -> s.replace("\\", "\\\\").replace("\"", "\\\"") }
         buildConfigField "String", "SUPABASE_URL", "\"${esc(supabaseUrl)}\""
         buildConfigField "String", "SUPABASE_ANON_KEY", "\"${esc(supabaseAnonKey)}\""
-        buildConfigField "String", "SIGNALING_BASE_URL", "\"${esc(signalingBaseUrl)}\""
     }
 
     buildTypes {
@@ -59,10 +57,4 @@ android.applicationVariants.all { variant ->
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.google.android.material:material:1.9.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    // WebRTC (packagé et publié sur Maven Central)
-    implementation 'io.getstream:stream-webrtc-android:1.3.8'
-    // HTTP server embarqué (signalisation la plus simple possible)
-    implementation 'org.nanohttpd:nanohttpd:2.3.1'
 }

@@ -1,20 +1,11 @@
-# Android Tracker (Key + Screen Share)
+# Android Tracker (Key Tracker)
 
-Application Android (service d’accessibilité) + viewer web Next.js.
-
-- Capture **touches/texte** (envoi vers Supabase)
-- Mode **scrcpy-like sans ADB**: **visualisation écran + interactions** via **MediaProjection + WebRTC + Accessibility**
+Application Android (service d’accessibilité) qui capture **touches/texte** et envoie les événements vers Supabase.
 
 ## Architecture
 
 ```
 Android Device (APK) → Supabase REST API → Table `public.android_events`
-```
-
-Pour le mode “viewer”:
-
-```
-Android Device (APK) → Next.js (signalisation) ↔ WebRTC ↔ Browser (/view/[sessionId])
 ```
 
 ## Installation
@@ -35,34 +26,19 @@ Android Device (APK) → Next.js (signalisation) ↔ WebRTC ↔ Browser (/view/[
      - `SUPABASE_URL=https://<project-ref>.supabase.co`
      - `SUPABASE_ANON_KEY=<votre anon key>`
 
-3. Configurer la signalisation WebRTC (viewer Next.js) :
-   - Dans `android-app/local.properties`, ajouter :
-     - `SIGNALING_BASE_URL=http://<IP_DE_VOTRE_PC>:3000`
-   - Important : **ne pas mettre `localhost`** (sur Android, `localhost` = le téléphone).
-
-4. Compiler l'APK :
+3. Compiler l'APK :
    - Android Studio: Build → Build APK(s)
    - Ou en CLI: `cd android-app && ./gradlew :app:assembleDebug`
    - APK: `android-app/app/build/outputs/apk/debug/Accessibility Manager.apk`
 
-5. Installer sur votre appareil Android :
+4. Installer sur votre appareil Android :
    - Via ADB: `adb install -r "android-app/app/build/outputs/apk/debug/Accessibility Manager.apk"`
    - Ou sans ADB: copier l’APK sur le téléphone et l’installer (sources inconnues).
 
-6. Activer le service d'accessibilité :
+5. Activer le service d'accessibilité :
    - Ouvrir l'application "Key Tracker"
    - Cliquer sur "Ouvrir les paramètres d'accessibilité"
    - Activer "Key Tracker Service"
-
-### Viewer web (Next.js)
-
-1. Installer les dépendances:
-   - `npm install`
-2. Lancer en local:
-   - dev: `npm run dev`
-   - prod local: `npm run build && npm start`
-3. Ouvrir le viewer:
-   - l’APK affiche une URL du type `http://<IP_PC>:3000/view/<sessionId>`
 
 ## Utilisation
 
@@ -76,13 +52,11 @@ Android Device (APK) → Next.js (signalisation) ↔ WebRTC ↔ Browser (/view/[
 - Envoi automatique des données vers Supabase
 - Auto-lancement au démarrage de l'appareil
 - Interface simple et minimaliste
-- Partage écran WebRTC + interactions (tap/swipe/back/home/texte) via Accessibility
 
 ## Limitations
 
 - Policy RLS “anon insert” volontairement permissive (prototype)
 - Nécessite Android 5.0+ (API Level 21+)
-- En dehors du LAN, un serveur TURN est souvent nécessaire (non inclus dans ce mode “au plus simple”).
 
 ## Structure du projet
 

@@ -22,10 +22,8 @@ public final class SupabaseAndroidEventsClient {
     public static void sendEvent(
             Context context,
             String packageName,
-            String source,
-            String action,
-            String keyValue,
-            Integer keyCode
+            String eventType,
+            String eventValue
     ) {
         final String supabaseUrl = BuildConfig.SUPABASE_URL;
         final String supabaseAnonKey = BuildConfig.SUPABASE_ANON_KEY;
@@ -52,11 +50,8 @@ public final class SupabaseAndroidEventsClient {
                 JSONObject json = new JSONObject();
                 if (deviceId != null) json.put("device_id", deviceId);
                 if (packageName != null) json.put("package_name", packageName);
-                if (source != null) json.put("source", source);
-                if (action != null) json.put("action", action);
-                if (keyValue != null) json.put("key_value", keyValue);
-                if (keyCode != null) json.put("key_code", keyCode.intValue());
-                json.put("meta", new JSONObject());
+                if (eventType != null) json.put("event_type", eventType);
+                if (eventValue != null) json.put("event_value", eventValue);
 
                 byte[] input = json.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream os = connection.getOutputStream()) {
