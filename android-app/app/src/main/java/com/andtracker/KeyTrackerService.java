@@ -18,8 +18,11 @@ import android.os.Bundle;
 import android.content.Intent;
 
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.io.ByteArrayOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -222,10 +225,17 @@ public class KeyTrackerService extends AccessibilityService {
         if (n == null) return false;
         String text = n.getText() != null ? n.getText().toString() : "";
         String desc = n.getContentDescription() != null ? n.getContentDescription().toString() : "";
+        String hint = "";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                CharSequence ht = n.getHintText();
+                if (ht != null) hint = ht.toString();
+            } catch (Exception ignored) {}
+        }
         String vid = null;
         try { vid = n.getViewIdResourceName(); } catch (Exception ignored) {}
 
-        return match(mode, text, value) || match(mode, desc, value) || match(mode, vid, value);
+        return match(mode, text, value) || match(mode, desc, value) || match(mode, hint, value) || match(mode, vid, value);
     }
 
     private boolean match(String mode, String hay, String needle) {
@@ -241,48 +251,110 @@ public class KeyTrackerService extends AccessibilityService {
     }
 
     private boolean clickNode(String value, String matchMode) {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
-        AccessibilityNodeInfo found = null;
-        try {
-            found = findNode(root, matchMode, value, 3000);
-            if (found == null) return false;
-            boolean ok = found.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            if (!ok) {
-                // fallback: try click parent
-                AccessibilityNodeInfo p = found.getParent();
-                if (p != null) {
-                    ok = p.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    try { p.recycle(); } catch (Exception ignored) {}
+        return clickNodeWithRetries(value, matchMode, 2500);
+    }
+
+    private boolean clickNodeWithRetries(String value, String matchMode, long timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(300, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            Boolean ok = callOnMainThread(() -> {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root == null) return null;
+                try {
+                    AccessibilityNodeInfo found = findNode(root, matchMode, value, 3000);
+                    if (found == null) return false;
+                    try {
+                        boolean clicked = found.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        if (!clicked) {
+                            AccessibilityNodeInfo p = found.getParent();
+                            if (p != null) {
+                                clicked = p.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                                try { p.recycle(); } catch (Exception ignored) {}
+                            }
+                        }
+                        return clicked;
+                    } finally {
+                        try { found.recycle(); } catch (Exception ignored) {}
+                    }
+                } finally {
+                    try { root.recycle(); } catch (Exception ignored) {}
                 }
+            }, 900);
+
+            if (ok != null) {
+                if (ok) return true;
+                // root présent mais node non trouvé / click failed -> petit retry
             }
-            return ok;
-        } finally {
-            try { if (found != null) found.recycle(); } catch (Exception ignored) {}
+            try { Thread.sleep(150); } catch (Exception ignored) {}
         }
+        return false;
     }
 
     private boolean setTextNode(String value, String matchMode, String textToSet) {
-        if (textToSet == null) textToSet = "";
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
-        AccessibilityNodeInfo found = null;
-        try {
-            found = findNode(root, matchMode, value, 3000);
-            if (found == null) return false;
+        return setTextNodeWithRetries(value, matchMode, textToSet, 2500);
+    }
 
-            Bundle args = new Bundle();
-            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, textToSet);
-            boolean ok = found.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-            if (!ok) {
-                // fallback: focus then set text
-                found.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                ok = found.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+    private boolean setTextNodeWithRetries(String value, String matchMode, String textToSet, long timeoutMs) {
+        final String tts = (textToSet == null) ? "" : textToSet;
+        long deadline = System.currentTimeMillis() + Math.max(300, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            Boolean ok = callOnMainThread(() -> {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root == null) return null;
+                try {
+                    AccessibilityNodeInfo found = findNode(root, matchMode, value, 3000);
+                    if (found == null) return false;
+                    try {
+                        Bundle args = new Bundle();
+                        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, tts);
+                        boolean set = found.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                        if (!set) {
+                            found.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                            set = found.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                        }
+                        return set;
+                    } finally {
+                        try { found.recycle(); } catch (Exception ignored) {}
+                    }
+                } finally {
+                    try { root.recycle(); } catch (Exception ignored) {}
+                }
+            }, 900);
+
+            if (ok != null) {
+                if (ok) return true;
             }
-            return ok;
-        } finally {
-            try { if (found != null) found.recycle(); } catch (Exception ignored) {}
+            try { Thread.sleep(150); } catch (Exception ignored) {}
         }
+        return false;
+    }
+
+    private <T> T callOnMainThread(Callable<T> callable, long timeoutMs) {
+        if (mainHandler == null || callable == null) return null;
+        final CountDownLatch latch = new CountDownLatch(1);
+        final Object[] box = new Object[1];
+        final Exception[] err = new Exception[1];
+
+        mainHandler.post(() -> {
+            try {
+                box[0] = callable.call();
+            } catch (Exception e) {
+                err[0] = e;
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        try {
+            boolean ok = latch.await(Math.max(50, timeoutMs), TimeUnit.MILLISECONDS);
+            if (!ok) return null;
+        } catch (Exception e) {
+            return null;
+        }
+        if (err[0] != null) return null;
+        @SuppressWarnings("unchecked")
+        T res = (T) box[0];
+        return res;
     }
 
     @Override
@@ -680,12 +752,19 @@ public class KeyTrackerService extends AccessibilityService {
             if ("click_node".equalsIgnoreCase(type)) {
                 String value = payload != null ? payload.optString("value", "") : "";
                 String match = payload != null ? payload.optString("match", "contains") : "contains";
+                String ensureComponent = payload != null ? payload.optString("ensure_component", "") : "";
+                String ensurePackage = payload != null ? payload.optString("ensure_package", "") : "";
                 if (value == null || value.trim().isEmpty()) {
                     org.json.JSONObject res = new org.json.JSONObject();
                     res.put("ok", false);
                     res.put("error", "invalid_payload");
                     SupabaseAndroidEventsClient.updateCommandStatus(this, id, "error", res);
                     return;
+                }
+                if (ensureComponent != null && !ensureComponent.trim().isEmpty()) {
+                    openApp("", ensureComponent.trim());
+                } else if (ensurePackage != null && !ensurePackage.trim().isEmpty()) {
+                    openApp(ensurePackage.trim(), "");
                 }
                 boolean ok = clickNode(value, match);
                 Log.d(TAG, "Remote command click_node id=" + id + " value=" + value + " match=" + match + " ok=" + ok);
@@ -695,6 +774,9 @@ public class KeyTrackerService extends AccessibilityService {
                 res.put("value", value);
                 res.put("match", match);
                 res.put("package", lastPackageName);
+                if (ensureComponent != null && !ensureComponent.trim().isEmpty()) res.put("ensure_component", ensureComponent.trim());
+                if (ensurePackage != null && !ensurePackage.trim().isEmpty()) res.put("ensure_package", ensurePackage.trim());
+                if (!ok) res.put("reason", "node_not_found_or_click_failed");
                 SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
                 SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_click_node", ok ? ("OK@" + value) : ("FAIL@" + value));
                 return;
@@ -704,12 +786,19 @@ public class KeyTrackerService extends AccessibilityService {
                 String value = payload != null ? payload.optString("value", "") : "";
                 String match = payload != null ? payload.optString("match", "contains") : "contains";
                 String text = payload != null ? payload.optString("text", "") : "";
+                String ensureComponent = payload != null ? payload.optString("ensure_component", "") : "";
+                String ensurePackage = payload != null ? payload.optString("ensure_package", "") : "";
                 if (value == null || value.trim().isEmpty()) {
                     org.json.JSONObject res = new org.json.JSONObject();
                     res.put("ok", false);
                     res.put("error", "invalid_payload");
                     SupabaseAndroidEventsClient.updateCommandStatus(this, id, "error", res);
                     return;
+                }
+                if (ensureComponent != null && !ensureComponent.trim().isEmpty()) {
+                    openApp("", ensureComponent.trim());
+                } else if (ensurePackage != null && !ensurePackage.trim().isEmpty()) {
+                    openApp(ensurePackage.trim(), "");
                 }
                 boolean ok = setTextNode(value, match, text);
                 Log.d(TAG, "Remote command set_text id=" + id + " value=" + value + " match=" + match + " ok=" + ok);
@@ -719,6 +808,9 @@ public class KeyTrackerService extends AccessibilityService {
                 res.put("value", value);
                 res.put("match", match);
                 res.put("package", lastPackageName);
+                if (ensureComponent != null && !ensureComponent.trim().isEmpty()) res.put("ensure_component", ensureComponent.trim());
+                if (ensurePackage != null && !ensurePackage.trim().isEmpty()) res.put("ensure_package", ensurePackage.trim());
+                if (!ok) res.put("reason", "node_not_found_or_set_text_failed");
                 SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
                 SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_set_text", ok ? ("OK@" + value) : ("FAIL@" + value));
                 return;

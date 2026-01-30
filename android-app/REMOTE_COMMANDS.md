@@ -33,10 +33,12 @@
 #### 6) `click_node`
 - Cherche un node d’accessibilité dont **text** / **content-desc** / **viewId** match `value`, puis clique.
 - **payload**: `{ "value": "<string>", "match": "contains|exact" }` (défaut `contains`)
+- Optionnel (plus fiable): `ensure_component` / `ensure_package` pour forcer l’app cible avant le click.
 
 #### 7) `set_text`
 - Cherche un node (mêmes règles que `click_node`) et tente `ACTION_SET_TEXT`.
 - **payload**: `{ "value": "<string>", "text": "<string>", "match": "contains|exact" }` (défaut `contains`)
+- Optionnel (plus fiable): `ensure_component` / `ensure_package` pour forcer l’app cible avant le set.
 
 #### 8) `open_app`
 - Tente d’ouvrir une app (pratique avant `click_node`/`set_text`).
@@ -71,11 +73,11 @@ values ('<device_id>', 'global_action', '{"action":"HOME"}'::jsonb);
 
 -- CLICK bouton par texte (contains)
 insert into public.android_commands (device_id, command_type, payload)
-values ('<device_id>', 'click_node', '{"value":"ENVOYER UN TEST","match":"contains"}'::jsonb);
+values ('<device_id>', 'click_node', '{"value":"ENVOYER UN TEST","match":"contains","ensure_component":"com.andtracker/.MainActivity"}'::jsonb);
 
 -- SET_TEXT dans un champ (match sur hint/label/text selon l'écran)
 insert into public.android_commands (device_id, command_type, payload)
-values ('<device_id>', 'set_text', '{"value":"Tape ici","match":"contains","text":"bonjour"}'::jsonb);
+values ('<device_id>', 'set_text', '{"value":"Tape ici","match":"contains","text":"bonjour","ensure_component":"com.andtracker/.MainActivity"}'::jsonb);
 
 -- Ouvrir l'app puis cliquer un bouton par texte
 insert into public.android_commands (device_id, command_type, payload)
