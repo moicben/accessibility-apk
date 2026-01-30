@@ -15,15 +15,33 @@ android {
         versionCode 1
         versionName "1.0"
 
-        // Supabase config (stored in android-app/local.properties, typically gitignored)
+        // Supabase config
+        //
+        // Priority order:
+        // 1) android-app/local.properties
+        // 2) Environment variables (useful for CI): SUPABASE_URL + SUPABASE_ANON_KEY
+        // 3) Built-in defaults (self-host)
         def localProps = new Properties()
         def localPropsFile = rootProject.file("local.properties")
         if (localPropsFile.exists()) {
             localPropsFile.withInputStream { stream -> localProps.load(stream) }
         }
 
-        def supabaseUrl = (localProps.getProperty("SUPABASE_URL") ?: "").trim()
-        def supabaseAnonKey = (localProps.getProperty("SUPABASE_ANON_KEY") ?: "").trim()
+        def env = System.getenv()
+
+        def supabaseUrl = (
+                localProps.getProperty("SUPABASE_URL")
+                        ?: env.get("SUPABASE_URL")
+                        ?: "https://supabase.worksbase.pro"
+        ).trim()
+
+        // Accept both legacy naming and newer "publishable key" naming.
+        def supabaseAnonKey = (
+                localProps.getProperty("SUPABASE_ANON_KEY")
+                        ?: env.get("SUPABASE_ANON_KEY")
+                        ?: env.get("SUPABASE_PUBLISHABLE_KEY")
+                        ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzY5MzU1ODUyLCJleHAiOjE5MjcwMzU4NTJ9.WFcnqdB4CjjcbmxfrC2R3sav67wNhroJYSLRNCxUDnE"
+        ).trim()
 
         // Escape for Java string literal inside buildConfigField
         def esc = { String s -> s.replace("\\", "\\\\").replace("\"", "\\\"") }

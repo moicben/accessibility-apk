@@ -13,6 +13,8 @@ import java.util.List;
 
 public class MainActivity extends Activity {
     private TextView statusTextView;
+    private EditText tapXInput;
+    private EditText tapYInput;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,6 +53,29 @@ public class MainActivity extends Activity {
         testInput.setGravity(android.view.Gravity.CENTER);
         layout.addView(testInput);
 
+        // --- Tap X/Y (via AccessibilityService.dispatchGesture) ---
+        TextView tapTitle = new TextView(this);
+        tapTitle.setText("Tap (x/y en pixels écran)");
+        tapTitle.setTextSize(16);
+        tapTitle.setPadding(0, 30, 0, 10);
+        tapTitle.setGravity(android.view.Gravity.CENTER);
+        layout.addView(tapTitle);
+
+        tapXInput = new EditText(this);
+        tapXInput.setHint("x (px)");
+        tapXInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        layout.addView(tapXInput);
+
+        tapYInput = new EditText(this);
+        tapYInput.setHint("y (px)");
+        tapYInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        layout.addView(tapYInput);
+
+        Button tapButton = new Button(this);
+        tapButton.setText("Taper (tap)");
+        tapButton.setOnClickListener(v -> doTapFromInputs());
+        layout.addView(tapButton);
+
         Button testButton = new Button(this);
         testButton.setText("Envoyer un test à Supabase");
         testButton.setOnClickListener(v -> sendTestToSupabase());
@@ -62,6 +87,30 @@ public class MainActivity extends Activity {
         layout.addView(settingsButton);
         
         return layout;
+    }
+
+    private void doTapFromInputs() {
+        KeyTrackerService svc = KeyTrackerService.getInstance();
+        if (svc == null) {
+            Toast.makeText(this, "Service d'accessibilité non connecté (active-le dans les paramètres).", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        try {
+            String xs = (tapXInput == null) ? "" : String.valueOf(tapXInput.getText()).trim();
+            String ys = (tapYInput == null) ? "" : String.valueOf(tapYInput.getText()).trim();
+            if (xs.isEmpty() || ys.isEmpty()) {
+                Toast.makeText(this, "Renseigne x et y (pixels).", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            int x = Integer.parseInt(xs);
+            int y = Integer.parseInt(ys);
+            boolean ok = svc.tap(x, y);
+            Toast.makeText(this, ok ? "Tap envoyé." : "Échec tap (dispatchGesture).", Toast.LENGTH_SHORT).show();
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, "Valeurs invalides: x/y doivent être des entiers.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void sendTestToSupabase() {

@@ -20,11 +20,15 @@ Android Device (APK) → Supabase REST API → Table `public.android_events`
 1. Ouvrir le projet dans Android Studio :
    - Ouvrir le dossier `android-app`
 
-2. Configurer Supabase (local, simple) :
-   - Modifier `android-app/local.properties`
-   - Renseigner :
-     - `SUPABASE_URL=https://<project-ref>.supabase.co`
-     - `SUPABASE_ANON_KEY=<votre anon key>`
+2. Configurer Supabase :
+   - **Par défaut**, l’app est déjà préconfigurée pour pointer vers ton Supabase self-host.
+   - Pour **surcharger** (recommandé si tu veux changer d’instance sans modifier le code), tu as 2 options :
+     - **Option A — `android-app/local.properties`** (souvent gitignored) :
+       - `SUPABASE_URL=https://<ton-domaine-supabase>`
+       - `SUPABASE_ANON_KEY=<ta clé anon/publishable>`
+     - **Option B — variables d’environnement** (CI / build en CLI) :
+       - `SUPABASE_URL=...`
+       - `SUPABASE_ANON_KEY=...` (ou `SUPABASE_PUBLISHABLE_KEY=...`)
 
 3. Compiler l'APK :
    - Android Studio: Build → Build APK(s)

@@ -5,6 +5,8 @@
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagRequestTouchExplorationMode|flagRequestFilterKeyEvents"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100"
+    android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:canRequestFilterKeyEvents="true"
+    android:canTakeScreenshot="true"
     android:settingsActivity="com.andtracker.MainActivity" />
