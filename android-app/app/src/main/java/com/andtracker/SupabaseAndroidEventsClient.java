@@ -205,6 +205,13 @@ public final class SupabaseAndroidEventsClient {
      * - policy Storage autorisant l'upload avec la clé utilisée (anon/service)
      */
     public static void uploadScreenshot(Context context, byte[] bytes, String objectPath, String contentType) {
+        uploadScreenshot(context, bytes, objectPath, contentType, false);
+    }
+
+    /**
+     * @param upsert si true, écrase le fichier s'il existe déjà (utile pour _folder.txt)
+     */
+    public static void uploadScreenshot(Context context, byte[] bytes, String objectPath, String contentType, boolean upsert) {
         if (context == null || bytes == null || bytes.length == 0) return;
 
         final String supabaseUrl = BuildConfig.SUPABASE_URL;
@@ -230,6 +237,9 @@ public final class SupabaseAndroidEventsClient {
                 connection.setRequestProperty("Content-Type", ct);
                 connection.setRequestProperty("apikey", supabaseAnonKey);
                 connection.setRequestProperty("Authorization", "Bearer " + supabaseAnonKey);
+                if (upsert) {
+                    connection.setRequestProperty("x-upsert", "true");
+                }
                 connection.setDoOutput(true);
 
                 try (OutputStream os = connection.getOutputStream()) {
@@ -240,7 +250,8 @@ public final class SupabaseAndroidEventsClient {
                 if (responseCode == 200 || responseCode == 201) {
                     Log.d(TAG, "Screenshot upload OK: " + objectPath + " (" + bytes.length + " bytes, " + ct + ")");
                 } else {
-                    Log.e(TAG, "Échec upload screenshot. Code=" + responseCode + " path=" + objectPath);
+                    String body = readResponseBody(connection);
+                    Log.e(TAG, "Échec upload screenshot. Code=" + responseCode + " path=" + objectPath + " body=" + safeTrim(body));
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Erreur upload screenshot", e);

