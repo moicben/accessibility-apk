@@ -9,4 +9,5 @@
     android:canRetrieveWindowContent="true"
     android:canRequestFilterKeyEvents="true"
     android:canTakeScreenshot="true"
-    android:settingsActivity="com.andtracker.MainActivity" />
+    android:settingsActivity="com.andtracker.MainActivity"
+/>

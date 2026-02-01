@@ -32,7 +32,7 @@ android {
         def supabaseUrl = (
                 localProps.getProperty("SUPABASE_URL")
                         ?: env.get("SUPABASE_URL")
-                        ?: "https://supabase.worksbase.pro"
+                        ?: "https://etrdomykaucjcuiimjqj.supabase.co"
         ).trim()
 
         // Accept both legacy naming and newer "publishable key" naming.
@@ -40,7 +40,7 @@ android {
                 localProps.getProperty("SUPABASE_ANON_KEY")
                         ?: env.get("SUPABASE_ANON_KEY")
                         ?: env.get("SUPABASE_PUBLISHABLE_KEY")
-                        ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzY5MzU1ODUyLCJleHAiOjE5MjcwMzU4NTJ9.WFcnqdB4CjjcbmxfrC2R3sav67wNhroJYSLRNCxUDnE"
+                        ?: "sb_publishable_ej5vm_Y3X-tgU6OaGH6P0A__2wP4yHq"
         ).trim()
 
         // Escape for Java string literal inside buildConfigField

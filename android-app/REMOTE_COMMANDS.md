@@ -1,7 +1,7 @@
 ## Remote commands (Supabase) — ultra concis
 
 ### Table
-- **Table**: `public.android_commands`
+- **Table**: `public.commands`
 - **Filtre device**: `device_id = Settings.Secure.ANDROID_ID` (côté APK)
 - **Workflow**:
   - tu `INSERT` une commande avec `status='pending'`
@@ -50,39 +50,39 @@
 
 ```sql
 -- TAP
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'tap', '{"x":610,"y":1751}'::jsonb);
 
 -- SWIPE 
 -- SWIPE d'un point à un autre (ex: du centre vers le haut)
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'swipe', '{"x1":540,"y1":1600,"x2":540,"y2":500,"durationMs":450}'::jsonb);
 
 -- DOUBLE TAP à une position
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'double_tap', '{"x":540,"y":950}'::jsonb);
 
 -- LONG PRESS sur un point (avec durée personnalisée)
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'long_press', '{"x":350,"y":1200,"durationMs":1200}'::jsonb);
 
 -- Action système globale (ex. bouton retour HOME)
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'global_action', '{"action":"HOME"}'::jsonb);
 
 
 -- CLICK bouton par texte (contains)
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'click_node', '{"value":"ENVOYER UN TEST","match":"contains","ensure_component":"com.andtracker/.MainActivity"}'::jsonb);
 
 -- SET_TEXT dans un champ (match sur hint/label/text selon l'écran)
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'set_text', '{"value":"Tape ici","match":"contains","text":"bonjour","ensure_component":"com.andtracker/.MainActivity"}'::jsonb);
 
 -- Ouvrir l'app puis cliquer un bouton par texte
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'open_app', '{"component":"com.andtracker/.MainActivity"}'::jsonb);
-insert into public.android_commands (device_id, command_type, payload)
+insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'click_node', '{"value":"ENVOYER UN TEST","match":"contains"}'::jsonb);
 ```
 

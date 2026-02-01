@@ -25,7 +25,7 @@ import java.util.concurrent.Executors;
 public final class SupabaseAndroidEventsClient {
     private static final String TAG = "SupabaseEvents";
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
-    private static final String SCREENSHOT_BUCKET = "android";
+    private static final String SCREENSHOT_BUCKET = "screenshots";
 
     private SupabaseAndroidEventsClient() {}
 
@@ -48,7 +48,7 @@ public final class SupabaseAndroidEventsClient {
         EXECUTOR.execute(() -> {
             HttpURLConnection connection = null;
             try {
-                URL url = new URL(supabaseUrl + "/rest/v1/android_events");
+                URL url = new URL(supabaseUrl + "/rest/v1/events");
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setConnectTimeout(5000);
@@ -85,7 +85,7 @@ public final class SupabaseAndroidEventsClient {
     }
 
     /**
-     * Lit une commande en attente depuis la table `android_commands` (polling REST).
+     * Lit une commande en attente depuis la table `commands` (polling REST).
      *
      * Table attendue (minimum):
      * - id (uuid)
@@ -107,9 +107,9 @@ public final class SupabaseAndroidEventsClient {
 
         HttpURLConnection connection = null;
         try {
-            // GET /rest/v1/android_commands?device_id=eq.<id>&status=eq.pending&select=...&order=created_at.asc&limit=1
+            // GET /rest/v1/commands?device_id=eq.<id>&status=eq.pending&select=...&order=created_at.asc&limit=1
             String urlStr = supabaseUrl
-                    + "/rest/v1/android_commands"
+                    + "/rest/v1/commands"
                     + "?device_id=eq." + URLEncoder.encode(deviceId, "UTF-8")
                     + "&status=eq.pending"
                     + "&select=id,command_type,payload"
@@ -144,7 +144,7 @@ public final class SupabaseAndroidEventsClient {
     }
 
     /**
-     * Met à jour une commande dans `android_commands` (status + result + executed_at).
+     * Met à jour une commande dans `commands` (status + result + executed_at).
      */
     public static boolean updateCommandStatus(Context context, String id, String status, JSONObject result) {
         final String supabaseUrl = BuildConfig.SUPABASE_URL;
@@ -157,7 +157,7 @@ public final class SupabaseAndroidEventsClient {
 
         HttpURLConnection connection = null;
         try {
-            String urlStr = supabaseUrl + "/rest/v1/android_commands?id=eq." + URLEncoder.encode(id, "UTF-8");
+            String urlStr = supabaseUrl + "/rest/v1/commands?id=eq." + URLEncoder.encode(id, "UTF-8");
             URL url = new URL(urlStr);
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("PATCH");
