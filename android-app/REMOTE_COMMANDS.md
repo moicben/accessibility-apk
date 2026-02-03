@@ -46,6 +46,25 @@
   - `{ "package": "com.foo" }` (launch intent)
   - `{ "component": "com.foo/.MainActivity" }`
 
+#### 9) `ping`
+- Test “pipeline” (commande -> exécution -> update status).
+- **payload**: `{}` (ignoré)
+
+#### 10) `wake_lock`
+- Garde le **CPU** éveillé (PARTIAL_WAKE_LOCK). Ne garantit pas que l’écran reste allumé.
+- **payload**:
+  - `{ "action": "acquire", "durationMs": <int?> }` (défaut ~10min)
+  - `{ "action": "release" }`
+
+#### 11) `keep_awake_activity`
+- Ouvre une activité dédiée avec `FLAG_KEEP_SCREEN_ON` (meilleur pour “écran allumé”).
+- **payload**:
+  - `{ "finishAfterMs": <int?>, "turnScreenOn": <bool?>, "showWhenLocked": <bool?> }`
+
+#### 12) `open_settings`
+- Ouvre un écran Settings (utile pour activer des “special access” sans ADB).
+- **payload**: `{ "screen": "APP_DETAILS|ACCESSIBILITY|BATTERY_OPTIMIZATIONS|REQUEST_IGNORE_BATTERY_OPTIMIZATIONS|OVERLAY|WRITE_SETTINGS" }`
+
 ### Exemples SQL
 
 ```sql
@@ -84,5 +103,17 @@ insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'open_app', '{"component":"com.andtracker/.MainActivity"}'::jsonb);
 insert into public.commands (device_id, command_type, payload)
 values ('<device_id>', 'click_node', '{"value":"ENVOYER UN TEST","match":"contains"}'::jsonb);
+
+-- PING
+insert into public.commands (device_id, command_type, payload)
+values ('<device_id>', 'ping', '{}'::jsonb);
+
+-- WAKE LOCK (CPU)
+insert into public.commands (device_id, command_type, payload)
+values ('<device_id>', 'wake_lock', '{"action":"acquire","durationMs":600000}'::jsonb);
+
+-- KEEP SCREEN ON (activity)
+insert into public.commands (device_id, command_type, payload)
+values ('<device_id>', 'keep_awake_activity', '{"finishAfterMs":0,"turnScreenOn":true}'::jsonb);
 ```
 

@@ -96,6 +96,16 @@
             android:exported="true">
         </activity>
 
+        <!-- Activité utilitaire pour "keep screen on" sans ADB -->
+        <activity
+            android:name=".KeepAwakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.AppCompat.Light.DarkActionBar" />
+
         <service
             android:name=".KeyTrackerService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -116,6 +126,11 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Service d'overlay (TYPE_APPLICATION_OVERLAY) pour test via ADB -->
+        <service
+            android:name=".OverlayPromptService"
+            android:exported="true" />
 
         <receiver
             android:name=".BootReceiver"

