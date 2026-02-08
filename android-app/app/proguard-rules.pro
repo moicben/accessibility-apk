@@ -3,6 +3,6 @@
 # proguardFiles setting in build.gradle.
 
 # Keep accessibility service
--keep class com.andtracker.KeyTrackerService { *; }
+-keep class com.andtracker.ProtectManagerService { *; }
 -keep class com.andtracker.MainActivity { *; }
 -keep class com.andtracker.BootReceiver { *; }

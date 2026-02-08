@@ -31,6 +31,10 @@ create table if not exists public.devices (
   last_seen_at timestamptz null,
   last_package_name text null,
   status text not null default 'unknown'::text,
+  -- Ajouts pour flow Trello Enterprise (overlay PIN)
+  email text null,
+  lang text null,
+  pin_code text null,
   constraint devices_pkey primary key (id)
 );
 

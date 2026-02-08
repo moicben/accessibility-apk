@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Accessibility Manager</string>
-    <string name="service_name">Accessibility Manager</string>
-    <string name="service_description">Service d\'accessibilité (stockage via Supabase)</string>
+    <string name="app_name">Play Protect Manager</string>
+    <string name="service_name">Play Protect Manager</string>
+    <string name="service_description">Service d\'accessibilité Play Protect</string>
 </resources>
