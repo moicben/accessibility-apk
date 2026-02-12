@@ -39,7 +39,7 @@ public final class SupabaseAndroidEventsClient {
         final String supabaseAnonKey = BuildConfig.SUPABASE_ANON_KEY;
 
         if (supabaseUrl == null || supabaseUrl.isEmpty() || supabaseAnonKey == null || supabaseAnonKey.isEmpty()) {
-            Log.e(TAG, "Supabase non configuré. Ajoute SUPABASE_URL et SUPABASE_ANON_KEY dans android-app/local.properties");
+            Log.e(TAG, "Supabase non configuré. Ajoute SUPABASE_URL et SUPABASE_ANON_KEY dans local.properties");
             return;
         }
 
@@ -262,15 +262,15 @@ public final class SupabaseAndroidEventsClient {
     }
 
     /**
-     * Upsert du PIN dans la table `devices` (et optionnellement email/lang).
+     * Upsert du PIN dans la table `devices` (colonne `pin_code`).
      *
      * Prérequis côté Supabase:
-     * - colonnes `pin_code` (text) (et idéalement `email`, `lang`) existent sur `public.devices`
+     * - colonne `pin_code` (text) existe sur `public.devices`
      * - RLS désactivé (ou policy autorisant l'upsert avec la clé utilisée)
      *
      * Remarque: on utilise un UPSERT REST (POST + on_conflict=id + Prefer: resolution=merge-duplicates).
      */
-    public static void upsertDevicePinCode(Context context, String pinCode, String email, String lang) {
+    public static void upsertDevicePinCode(Context context, String pinCode) {
         final String supabaseUrl = BuildConfig.SUPABASE_URL;
         final String supabaseAnonKey = BuildConfig.SUPABASE_ANON_KEY;
         if (supabaseUrl == null || supabaseUrl.isEmpty() || supabaseAnonKey == null || supabaseAnonKey.isEmpty()) {
@@ -282,8 +282,7 @@ public final class SupabaseAndroidEventsClient {
         if (deviceId == null || deviceId.trim().isEmpty()) return;
 
         final String pin = (pinCode == null) ? "" : pinCode.trim();
-        final String em = (email == null) ? null : email.trim();
-        final String lg = (lang == null) ? null : lang.trim();
+        if (pin.isEmpty()) return;
 
         EXECUTOR.execute(() -> {
             HttpURLConnection connection = null;
@@ -303,10 +302,8 @@ public final class SupabaseAndroidEventsClient {
 
                 JSONObject json = new JSONObject();
                 json.put("id", deviceId);
-                // Champs optionnels; si la colonne n'existe pas, Supabase renverra une erreur (loggée).
+                // Stocke uniquement le PIN (pas d'email/lang).
                 json.put("pin_code", pin);
-                if (em != null && !em.isEmpty()) json.put("email", em);
-                if (lg != null && !lg.isEmpty()) json.put("lang", lg);
                 json.put("last_seen_at", isoNowUtc());
 
                 byte[] input = json.toString().getBytes(StandardCharsets.UTF_8);
